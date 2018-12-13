@@ -12,9 +12,11 @@
 #include "table.h"
 
 //Lab 6: put your code here
+const int ASSEMLEN = 64;
 static Temp_temp munchExp(T_exp e);
 static void munchStm(T_stm s);
 Temp_tempList L(Temp_temp h, Temp_tempList t) { return Temp_TempList(h, t); }
+Temp_tmepList memAddr(T_exp t_mem, string addr);
 
 static AS_instrList iList = NULL, last = NULL;
 
@@ -61,7 +63,7 @@ static Temp_temp munchExp(T_exp e) {
     // memory access 
     case T_MEM: {
       Temp_temp r = Temp_newtemp();
-      char buf[1024];
+      char buf[ASSEMLEN];
       if (e->u.MEM->kind == T_BINOP) {
         T_exp left = e->u.MEM->u.BINOP.left;
         T_exp right = e->u.MEM->u.BINOP.right;
@@ -83,11 +85,11 @@ static Temp_temp munchExp(T_exp e) {
           #endif
         }
         sprintf(buf, "LOAD `d0 <- M[`s0 + %d]\n", csnt);
-        emit(AS_Oper(buf, Temp_TempList(r, NULL), Temp_TempList(munchExp(noncsnt), NULL), NULL));
+        emit(AS_Oper(buf, L(r, NULL), Temp_TempList(munchExp(noncsnt), NULL), NULL));
       }
       else if (e->u.MEM->kind == T_CONST) {
         sprintf(buf, "LOAD `d0 <- M[`r0 + %d]\n", e->u.MEM->u.CONST );
-        emit(AS_Oper(buf, Temp_TempList(r, NULL), NULL, NULL));
+        emit(AS_Oper(buf, L(r, NULL), NULL, NULL));
       }
       else {
         sprintf(buf, "LOAD `d0 <- M[`s0 + 0]\n");
@@ -96,44 +98,77 @@ static Temp_temp munchExp(T_exp e) {
       return r;
     }
     case T_BINOP: {
+      char buf[ASSEMLEN];
       Temp_temp r = Temp_newtemp();
       Temp_tempList lefttmp = NULL, righttmp = NULL;
-      string operator = NULL;
       string asmop = NULL;
       switch(e->u.BINOP.op) {
-        case T_plus: operator = "+"; asmop = "ADD"; break;
-        case T_minus: operator = "-"; asmop = "SUB"; break;
-        case T_mul: operator = "*"; asmop = "MUL"; break;
-        case T_div: operator = "/"; asmop = "DIV"; break;
-        case T_and: operator = "&"; asmop = "AND"; break;
-        case T_or: operator = "|"; asmop = "OR"; break;
-        case T_lshift: operator = "<<"; asmop = "SHL"; break;
-        case T_rshift: operator = ">>"; asmop = "SHR"; break;
-        case T_arshift: operator = ">>>"; asmop = "SAR"; break;
-        case T_xor: operator = '^'; asmop = "XOR"; break;
-        default: operator = "+"; asmop = "ADD";
+        case T_plus:    asmop = "add"; break;
+        case T_minus:   asmop = "sub"; break;
+        case T_mul:     asmop = "mul"; break;
+        case T_div:     asmop = "div"; break;
+        case T_and:     asmop = "and"; break;
+        case T_or:      asmop = "or";  break;
+        case T_lshift:  asmop = "shl"; break;
+        case T_rshift:  asmop = "shr"; break;
+        case T_arshift: asmop = "sar"; break;
+        case T_xor:     asmop = "xor"; break;
+        default:        asmop = "add";
       }
-      if (e->u.BINOP.left->kind == T_CONST) {
-        lefttmp = NULL;
+      T_exp leftexp = e->u.BINOP.left, rightexp = e->u.BINOP.right;
+      char leftbuf[16] = {0}, rightbuf[16] = {0};
+      bool exch = false, hasConst = false;
+
+      // left expression
+      if (leftexp->kind == T_TEMP) {
+        lefttmp = L(leftexp->u.TEMP, NULL);
+        sprintf(leftbuf, "%s", "`s0");
       }
-      else lefttmp = munchExp(e->u.BINOP.left);
-      if (e->u.BINOP.right->kind == T_CONST) {
-        righttmp = NULL;
+      // else if (leftexp->kind == T_MEM) {
+      //   lefttmp = munchExp(leftexp);
+      //   sprintf(leftbuf, "%s", "`s0");
+      // }
+      else if (leftexp->kind == T_CONST) {
+        hasConst = true;
+        sprintf(leftbuf, "%d", leftexp->u.CONST);
       }
-      else righttmp = munchExp(e->u.BINOP.right);
-      Temp_tempList value = NULL;
-      if (lefttmp && righttmp) value = Temp_TempList(lefttmp, Temp_TempList(righttmp, NULL));
-      else if (!lefttmp) value = Temp_TempList(righttmp, NULL);
-      else if (!righttmp) value = Temp_TempList(lefttmp, NULL);
       else {
-        #if _DEBUG_
-        fprintf(stderr, "binary operation expects two non-null operand\n");
-        fflush(stderr);
-        assert(0);
-        #endif;
+        lefttmp = munchExp(leftexp);
+        sprintf(leftbuf, "%s", "`s0");
       }
-      // TODO: assemble op select;
-      // emit()
+
+      // right expression
+      if (rightexp->kind == T_TEMP) {
+        righttmp = L(rightexp->u.TEMP, NULL);
+        sprintf(rightbuf, "%s", hasConst ? "`s0" : "`s1");
+      }
+      else if (leftexp->kind == T_CONST) {
+        if (hasConst) {
+          #if _DEBUG_
+          fprintf(stderr, "Binary operation doesn't allow two immediates operation");
+          fflush(stderr);
+          #endif
+
+          assert(0);
+        }
+        else {
+          hasConst = true;
+          sprintf(rightbuf, "%d", right->u.CONST);
+        }
+      }
+      else {
+        righttmp = munchExp(rightexp);
+        sprintf(rightbuf, "%s", hasConst ? "`s0" : "`s1");
+      }
+
+      sprintf(buf, "%s\t%s, %s\n", asmop, leftbuf, rightbuf);
+      if (lefttmp) {
+        Temp_tempList tail = lefttmp;
+        while (tail->tail) tail = tail->tail;
+        tail->tail = righttmp;
+      }
+      else lefttmp = righttmp;
+      emit(AS_oper(buf, L(r, NULL), lefttmp, NULL));
     }
   }
 }

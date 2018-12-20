@@ -85,7 +85,54 @@ F_fragList F_getResult(void)
 	return fl;
 }
 
+Temp_temp rax = NULL, rcx = NULL, 
+					rdx = NULL, rbx = NULL,
+					rsi = NULL, rdi = NULL,
+					rsp = NULL, rbp = NULL,
+					r8  = NULL, r9  = NULL,
+					r10 = NULL, r11 = NULL,
+					r12 = NULL, r13 = NULL,
+					r14 = NULL, r15 = NULL;
+
+void init_tempMap()
+{
+	// F_tempMap = Temp_empty();
+	rax = Temp_newtemp();
+	Temp_enter(F_tempMap, rax, "%%rax");
+	rcx = Temp_newtemp();
+	Temp_enter(F_tempMap, rcx, "%%rcx");
+	rdx = Temp_newtemp();
+	Temp_enter(F_tempMap, rdx, "%%rdx");
+	rbx = Temp_newtemp();
+	Temp_enter(F_tempMap, rbx, "%%rbx");
+	rsi = Temp_newtemp();
+	Temp_enter(F_tempMap, rsi, "%%rsi");
+	rdi = Temp_newtemp();
+	Temp_enter(F_tempMap, rdi, "%%rdi");
+	rsp = Temp_newtemp();
+	Temp_enter(F_tempMap, rsp, "%%rsp");
+	rbp = Temp_newtemp();
+	Temp_enter(F_tempMap, rbp, "%%rbp");
+	r8 = Temp_newtemp();
+	Temp_enter(F_tempMap, r8, "%%r8");
+	r9 = Temp_newtemp();
+	Temp_enter(F_tempMap, r9, "%%r9");
+	r10 = Temp_newtemp();
+	Temp_enter(F_tempMap, r10, "%%r10");
+	r11 = Temp_newtemp();
+	Temp_enter(F_tempMap, r11, "%%r11");
+	r12 = Temp_newtemp();
+	Temp_enter(F_tempMap, r12, "%%r12");
+	r13 = Temp_newtemp();
+	Temp_enter(F_tempMap, r13, "%%r13");
+	r14 = Temp_newtemp();
+	Temp_enter(F_tempMap, r14, "%%r14");
+	r15 = Temp_newtemp();
+	Temp_enter(F_tempMap, r15, "%%r15");
+}
+
 // create a new Frame with label name and formals
+// TODO: x86 only allow at most 6 formals in register
 F_frame F_newFrame(Temp_label name, U_boolList formals)
 {
 	F_frame ret = (F_frame) checked_malloc(sizeof (struct F_frame_));
@@ -180,7 +227,7 @@ F_accessList F_formals (F_frame f)
  */
 Temp_temp F_FP(void)
 {
-	return Temp_newtemp();
+	return rbp;
 }
 
 /*
@@ -189,7 +236,7 @@ Temp_temp F_FP(void)
  */
 Temp_temp F_RV(void)
 {
-	return Temp_newtemp();
+	return rax;
 }
 
 /*

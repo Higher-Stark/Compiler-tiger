@@ -650,7 +650,7 @@ Tr_exp Tr_seqExp(Tr_exp exp1, Tr_exp exp2)
  */
 Tr_exp Tr_assignExp(Tr_exp acc, Tr_exp exp)
 {
-	T_stm s1 = T_Move(T_Mem(unEx(acc)), unEx(exp));
+	T_stm s1 = T_Move(unEx(acc), unEx(exp));
 	return Tr_Nx(s1);
 }
 
@@ -661,7 +661,7 @@ Tr_exp Tr_assignExp(Tr_exp acc, Tr_exp exp)
  */
 Tr_exp Tr_varDec(Tr_access acc, Tr_exp init)
 {
-	T_stm s1 = T_Move(T_Mem(F_Exp(acc->access, T_Temp(F_FP()))), unEx(init));
+	T_stm s1 = T_Move(F_Exp(acc->access, T_Temp(F_FP())), unEx(init));
 	return Tr_Nx(s1);
 }
 

@@ -602,14 +602,13 @@ T_expList argument(Tr_expList explist)
  */
 Tr_exp Tr_callExp(Tr_level callerlevel, Tr_level calleelevel, Temp_label name, Tr_expList explist)
 {
-	F_access stlink = F_formals(calleelevel->frame)->head;
 	Tr_level cur = callerlevel;
-	T_exp res = T_Temp(F_FP());
+	T_exp link = T_Temp(F_FP());
 	while (cur != calleelevel->parent) {
-		res = F_Exp(F_formals(cur->frame)->head, res);
+		link = F_Exp(F_formals(cur->frame)->head, link);
 		cur = cur->parent;
 	}
-	return Tr_Ex(T_Call(T_Name(name), T_ExpList(res, argument(explist))));
+	return Tr_Ex(T_Call(T_Name(name), T_ExpList(link, argument(explist))));
 }
 
 /*

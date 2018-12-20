@@ -17,6 +17,10 @@ Temp_map F_tempMap;
 
 void init_tempMap();
 
+Temp_temp r(int i);
+
+string name_r(int i);
+
 F_frame F_newFrame(Temp_label name, U_boolList formals);
 
 Temp_label F_name(F_frame f);

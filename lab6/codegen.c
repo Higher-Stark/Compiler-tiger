@@ -200,7 +200,6 @@ static void munchStm(T_stm s)
  */
 Temp_tempList munchArgs(int cnt, T_expList args)
 {
-  // TODO:
   T_expList e = args;
   int cursor = 0;
   while (e && cursor < cnt) {
@@ -208,9 +207,31 @@ Temp_tempList munchArgs(int cnt, T_expList args)
     cursor++;
   }
   if (!e) return NULL;
+
+  string dest = NULL;
+  Temp_temp destreg = NULL;
+  if (cnt > 0 && cnt <= 6) {
+    dest = name_r(cnt);
+    destreg = r(cnt);
+  }
+  else if (cnt == 0) {
+    dest = "-8(%%rsp)";
+  }
+  else {
+    dest = (string) checked_malloc(16);
+    sprintf(dest, "-%d(%%rsp)", F_wordSize * cnt - 5);
+  }
+  {
+    string buf = (string) checked_malloc(ASSEMLEN);
+    sprintf(buf, "movq\t`s0, %s\n", dest);
+    Temp_temp r= munchExp(e->head);
+    emit(AS_Move(buf, destreg ? L(destreg, NULL) : NULL, L(r, NULL)));
+    return L(destreg, NULL);
+  }
+  /*
   if (e->head->kind == T_TEMP) {
     string buf = (string) checked_malloc(ASSEMLEN);
-    sprintf(buf, "movq\t`s0, `d0\n");
+    sprintf(buf, "movq\t`s0, %s\n", dest);
     Temp_temp r = Temp_newtemp();
     emit(
       AS_Move(buf, L(r, NULL), 
@@ -221,6 +242,7 @@ Temp_tempList munchArgs(int cnt, T_expList args)
     Temp_temp r = munchExp(e->head);
     return L(r, munchArgs(cnt+1, args));
   }
+  */
 }
 
 /*

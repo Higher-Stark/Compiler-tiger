@@ -17,6 +17,7 @@ const int F_wordSize = 8;
 // and a list of argument and local  variable
 struct F_frame_ {
 	Temp_label name;
+	U_boolList formalEscapeList;
 	F_accessList formals;
 	F_accessList locals;
 
@@ -131,24 +132,51 @@ void init_tempMap()
 	Temp_enter(F_tempMap, r15, "%%r15");
 }
 
+Temp_temp r(int i)
+{
+	switch(i) {
+		case 1: return rdi;
+		case 2: return rsi;
+		case 3: return rdx;
+		case 4: return rcx;
+		case 5: return r8;
+		case 6: return r9;
+	}
+	assert(0);
+}
+
+string name_r(int i) {
+	switch(i) {
+		case 1: return "%%rdi";
+		case 2: return "%%rsi";
+		case 3: return "%%rdx";
+		case 4: return "%%rcx";
+		case 5: return "%%8";
+		case 6: return "%%r9";
+	}
+	assert(0);
+}
+
 // create a new Frame with label name and formals
 // TODO: x86 only allow at most 6 formals in register
 F_frame F_newFrame(Temp_label name, U_boolList formals)
 {
 	F_frame ret = (F_frame) checked_malloc(sizeof (struct F_frame_));
 	ret->name = name;
+	ret->formalEscapeList = formals;
 	U_boolList cursor = formals;
 	F_accessList list = NULL;
 	F_accessList tail = list;
 	Temp_tempList tmplist = NULL;
 	Temp_tempList tmptail = NULL;
-	int fmlcnt = 0;
+	int fmlcnt = 1;
+	int reg_formal = 0;
 	while (cursor) {
 		F_accessList newtail = (F_accessList) checked_malloc(sizeof(struct F_accessList_));
 		F_access next = (F_access) checked_malloc(sizeof(struct F_access_));
-		if (cursor->head) {
+		if (reg_formal > 6 || cursor->head) {
 			next->kind = inFrame;
-			next->u.offset = F_wordSize * fmlcnt;
+			next->u.offset = - F_wordSize * fmlcnt;
 			fmlcnt += 1;
 		}
 		else {

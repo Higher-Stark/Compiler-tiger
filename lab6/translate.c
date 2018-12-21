@@ -164,7 +164,8 @@ Tr_level Tr_newLevel(Tr_level parent, Temp_label name, U_boolList formals)
 // Transform F_accessList to Tr_accessList
 Tr_accessList Tr_formals(Tr_level level)
 {
-	F_accessList cursor = F_formals(level->frame);
+	// remove the first access 
+	F_accessList cursor = F_formals(level->frame)->tail;
 	if (!cursor) return NULL;
 	Tr_accessList ret = NULL;
 	Tr_accessList tail = NULL;

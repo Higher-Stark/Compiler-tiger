@@ -5,6 +5,7 @@
 #define FRAME_H
 
 #include "tree.h"
+#include "assem.h"
 
 typedef struct F_frame_ *F_frame;
 
@@ -41,7 +42,15 @@ F_access F_offset(F_access acc, const int offset);
 
 T_exp F_externalCall(string s, T_expList args);
 
+Temp_tempList callerSaves();
+
+Temp_tempList calleeSaves();
+
 T_stm F_procEntryExit1(F_frame frame, T_stm stm);
+
+AS_instrList F_procEntryExit2(AS_instrList body);
+
+AS_proc F_procEntryExit3(F_frame frame, AS_instrList body);
 
 /* declaration for fragments */
 typedef struct F_frag_ *F_frag;

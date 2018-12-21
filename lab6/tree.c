@@ -50,11 +50,14 @@ T_stm T_Cjump(T_relOp op, T_exp left, T_exp right,
 }
  
 T_stm T_Move(T_exp dst, T_exp src)
-{T_stm p = (T_stm) checked_malloc(sizeof *p);
- p->kind=T_MOVE;
- p->u.MOVE.dst=dst;
- p->u.MOVE.src=src;
- return p;
+{
+  // assert(dst->kind != T_NAME);
+  // assert(src->kind != T_NAME);
+  T_stm p = (T_stm)checked_malloc(sizeof *p);
+  p->kind = T_MOVE;
+  p->u.MOVE.dst = dst;
+  p->u.MOVE.src = src;
+  return p;
 }
  
 T_stm T_Exp(T_exp exp)
@@ -83,6 +86,7 @@ T_exp T_Mem(T_exp exp)
 T_exp T_Temp(Temp_temp temp)
 {T_exp p = (T_exp) checked_malloc(sizeof *p);
  p->kind=T_TEMP;
+ assert(temp);
  p->u.TEMP=temp;
  return p;
 }

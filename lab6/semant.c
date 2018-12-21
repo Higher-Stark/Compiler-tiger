@@ -510,8 +510,10 @@ Tr_exp transDec(S_table venv, S_table tenv, A_dec d, Tr_level l, Temp_label labe
 
 				U_boolList bl = fieldL2boolL(f->params);
 				Ty_tyList formalTys = makeFormalTyList(tenv, f->params);
-				Tr_level funlevel = Tr_newLevel(l, Temp_newlabel(), bl);
-				S_enter(venv, f->name, E_FunEntry(funlevel, Temp_newlabel(), formalTys, resultTy));
+				// TODO: change named label to random label
+				Temp_label flabel = Temp_namedlabel(S_name(f->name));
+				Tr_level funlevel = Tr_newLevel(l, flabel, bl);
+				S_enter(venv, f->name, E_FunEntry(funlevel, flabel, formalTys, resultTy));
 			}
 			for (A_fundecList list = d->u.function; list; list = list->tail) {
 				S_beginScope(venv);
@@ -595,7 +597,6 @@ Ty_ty transTy(S_table tenv, A_ty a)
 F_fragList SEM_transProg(A_exp exp){
 
 	//TODO LAB5: do not forget to add the main frame
-	Esc_findEscape(exp);
 	Tr_level outside = Tr_outermost();
 	S_table tenv = E_base_tenv();
 	S_table venv = E_base_venv();

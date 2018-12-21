@@ -23,6 +23,11 @@
 #include "codegen.h"
 #include "regalloc.h"
 
+
+#ifndef _DEBUG_
+#define _DEBUG_ 1
+#endif
+
 extern bool anyErrors;
 
 /*Lab6: complete the function doProc
@@ -43,26 +48,25 @@ static void doProc(FILE *out, F_frame frame, T_stm body)
  struct C_block blo;
 
  F_tempMap = Temp_empty();
- init_tempMap();
 
- //printf("doProc for function %s:\n", S_name(F_name(frame)));
- /*printStmList(stdout, T_StmList(body, NULL));
- printf("-------====IR tree=====-----\n");*/
+ printf("doProc for function %s:\n", S_name(F_name(frame)));
+ printStmList(stdout, T_StmList(body, NULL));
+ printf("-------====IR tree=====-----\n");
 
  stmList = C_linearize(body);
- /*printStmList(stdout, stmList);
- printf("-------====Linearlized=====-----\n");*/
+ printStmList(stdout, stmList);
+ printf("-------====Linearlized=====-----\n");
 
  blo = C_basicBlocks(stmList);
  C_stmListList stmLists = blo.stmLists;
- /*for (; stmLists; stmLists = stmLists->tail) {
+ for (; stmLists; stmLists = stmLists->tail) {
  	printStmList(stdout, stmLists->head);
 	printf("------====Basic block=====-------\n");
- }*/
+ }
 
  stmList = C_traceSchedule(blo);
- /*printStmList(stdout, stmList);
- printf("-------====trace=====-----\n");*/
+ printStmList(stdout, stmList);
+ printf("-------====trace=====-----\n");
  iList  = F_codegen(frame, stmList); /* 9 */
 
  AS_printInstrList(stdout, iList, Temp_layerMap(F_tempMap, Temp_name()));
@@ -71,16 +75,9 @@ static void doProc(FILE *out, F_frame frame, T_stm body)
  //G_graph fg = FG_AssemFlowGraph(iList);  /* 10.1 */
  struct RA_result ra = RA_regAlloc(frame, iList);  /* 11 */
 
- fprintf(out, "BEGIN function\n");
- AS_printInstrList (out, proc->body,
-                       Temp_layerMap(F_tempMap, ra.coloring));
- fprintf(out, "END function\n");
-
- //Part of TA's implementation. Just for reference.
- /*
- AS_rewrite(ra.il, Temp_layerMap(F_tempMap, ra.coloring));
  proc =	F_procEntryExit3(frame, ra.il);
 
+ fprintf(out, "BEGIN function\n");
  string procName = S_name(F_name(frame));
  fprintf(out, ".text\n");
  fprintf(out, ".globl %s\n", procName);
@@ -94,6 +91,12 @@ static void doProc(FILE *out, F_frame frame, T_stm body)
  AS_printInstrList (out, proc->body,
                        Temp_layerMap(F_tempMap, ra.coloring));
  fprintf(out, "%s", proc->epilog);
+ fprintf(out, "END function\n");
+
+ //Part of TA's implementation. Just for reference.
+ /*
+ AS_rewrite(ra.il, Temp_layerMap(F_tempMap, ra.coloring));
+
  //fprintf(out, "END %s\n\n", Temp_labelstring(F_name(frame)));
  */
 }
@@ -128,15 +131,18 @@ int main(int argc, string *argv)
    if (!absyn_root)
      return 1;
      
-#if 0
+#if _DEBUG_
    pr_exp(out, absyn_root, 0); /* print absyn data structure */
    fprintf(out, "\n");
+   fflush(out);
 #endif
 
    //Lab 6: escape analysis
    //If you have implemented escape analysis, uncomment this
-   //Esc_findEscape(absyn_root); /* set varDec's escape field */
+   Esc_findEscape(absyn_root); /* set varDec's escape field */
 
+   F_tempMap = Temp_empty();
+   init_tempMap();
    frags = SEM_transProg(absyn_root);
    if (anyErrors) return 1; /* don't continue */
 

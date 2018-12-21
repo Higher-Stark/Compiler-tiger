@@ -17,6 +17,7 @@ const int F_wordSize = 8;
 // and a list of argument and local  variable
 struct F_frame_ {
 	Temp_label name;
+	long frameSize;
 	U_boolList formalEscapeList;
 	F_accessList formals;
 	F_accessList locals;
@@ -95,41 +96,49 @@ Temp_temp rax = NULL, rcx = NULL,
 					r12 = NULL, r13 = NULL,
 					r14 = NULL, r15 = NULL;
 
+Temp_map specialregs = NULL;
+Temp_map argregs = NULL;
+Temp_map calleesaves = NULL;
+Temp_map callersaves = NULL;
+
 void init_tempMap()
 {
-	// F_tempMap = Temp_empty();
+	specialregs = Temp_empty();
+	argregs = Temp_empty();
+	calleesaves = Temp_empty();
+	callersaves = Temp_empty();
 	rax = Temp_newtemp();
-	Temp_enter(F_tempMap, rax, "%%rax");
+	Temp_enter(specialregs, rax, "%%rax");
 	rcx = Temp_newtemp();
-	Temp_enter(F_tempMap, rcx, "%%rcx");
+	Temp_enter(argregs, rcx, "%%rcx");
 	rdx = Temp_newtemp();
-	Temp_enter(F_tempMap, rdx, "%%rdx");
+	Temp_enter(argregs, rdx, "%%rdx");
 	rbx = Temp_newtemp();
-	Temp_enter(F_tempMap, rbx, "%%rbx");
+	Temp_enter(calleesaves, rbx, "%%rbx");
 	rsi = Temp_newtemp();
-	Temp_enter(F_tempMap, rsi, "%%rsi");
+	Temp_enter(argregs, rsi, "%%rsi");
 	rdi = Temp_newtemp();
-	Temp_enter(F_tempMap, rdi, "%%rdi");
+	Temp_enter(argregs, rdi, "%%rdi");
 	rsp = Temp_newtemp();
-	Temp_enter(F_tempMap, rsp, "%%rsp");
+	Temp_enter(specialregs, rsp, "%%rsp");
 	rbp = Temp_newtemp();
-	Temp_enter(F_tempMap, rbp, "%%rbp");
+	Temp_enter(calleesaves, rbp, "%%rbp");
 	r8 = Temp_newtemp();
-	Temp_enter(F_tempMap, r8, "%%r8");
+	Temp_enter(argregs, r8, "%%r8");
 	r9 = Temp_newtemp();
-	Temp_enter(F_tempMap, r9, "%%r9");
+	Temp_enter(argregs, r9, "%%r9");
 	r10 = Temp_newtemp();
-	Temp_enter(F_tempMap, r10, "%%r10");
+	Temp_enter(callersaves, r10, "%%r10");
 	r11 = Temp_newtemp();
-	Temp_enter(F_tempMap, r11, "%%r11");
+	Temp_enter(callersaves, r11, "%%r11");
 	r12 = Temp_newtemp();
-	Temp_enter(F_tempMap, r12, "%%r12");
+	Temp_enter(calleesaves, r12, "%%r12");
 	r13 = Temp_newtemp();
-	Temp_enter(F_tempMap, r13, "%%r13");
+	Temp_enter(calleesaves, r13, "%%r13");
 	r14 = Temp_newtemp();
-	Temp_enter(F_tempMap, r14, "%%r14");
+	Temp_enter(calleesaves, r14, "%%r14");
 	r15 = Temp_newtemp();
-	Temp_enter(F_tempMap, r15, "%%r15");
+	Temp_enter(calleesaves, r15, "%%r15");
 }
 
 Temp_temp r(int i)
@@ -157,12 +166,30 @@ string name_r(int i) {
 	assert(0);
 }
 
+F_access F_inFrame(int offset) 
+{
+	F_access acc = (F_access) checked_malloc(sizeof(struct F_access_));
+	acc->kind = inFrame;
+	acc->u.offset = offset;
+	return acc;
+}
+
+F_access F_inReg(Temp_temp reg)
+{
+	F_access acc = (F_access) checked_malloc(sizeof(struct F_access_));
+	acc->kind = inReg;
+	acc->u.reg = reg;
+	return acc;
+}
+
 // create a new Frame with label name and formals
 // TODO: x86 only allow at most 6 formals in register
 F_frame F_newFrame(Temp_label name, U_boolList formals)
 {
 	F_frame ret = (F_frame) checked_malloc(sizeof (struct F_frame_));
 	ret->name = name;
+	ret->locals = NULL;
+	ret->frameSize = 0;
 	ret->formalEscapeList = formals;
 	U_boolList cursor = formals;
 	F_accessList list = NULL;
@@ -170,41 +197,49 @@ F_frame F_newFrame(Temp_label name, U_boolList formals)
 	Temp_tempList tmplist = NULL;
 	Temp_tempList tmptail = NULL;
 	int fmlcnt = 1;
-	int reg_formal = 0;
-	while (cursor) {
-		F_accessList newtail = (F_accessList) checked_malloc(sizeof(struct F_accessList_));
-		F_access next = (F_access) checked_malloc(sizeof(struct F_access_));
-		if (reg_formal > 6 || cursor->head) {
-			next->kind = inFrame;
-			next->u.offset = - F_wordSize * fmlcnt;
-			fmlcnt += 1;
-		}
-		else {
-			next->kind = inReg;
-			next->u.reg = Temp_newtemp();
-			if (tmptail) {
-				tmptail->tail = Temp_TempList(next->u.reg, NULL);
-				tmptail = tmptail->tail;
-			}
-			else {
-				tmplist = Temp_TempList(next->u.reg, NULL);
-				tmptail = tmplist;
-			}
-		}
-		newtail->head = next;
-		newtail->tail = NULL;
-		if (tail) {
-			tail->tail = newtail;
-			tail = tail->tail;
-		}
-		else {
-			list = newtail;
-			tail = newtail;
-		}
+	// int reg_formal = 0;
+
+	{
+		// static link
+		list = F_newAccessList(F_inFrame(F_wordSize * 2), NULL);
+		tail = list;
 		cursor = cursor->tail;
+		while (cursor) {
+			F_access next = NULL;
+			// fist 6 parameters
+			if (fmlcnt <= 6) {
+				if (cursor->head) {
+					next = F_allocLocal(ret, TRUE);
+				}
+				else {
+					next = F_inReg(r(fmlcnt));
+				}
+			}
+			// more than 6 parameters
+			else {
+				next = F_inFrame(F_wordSize * (fmlcnt - 4));
+			}
+			cursor = cursor->tail;
+			fmlcnt++;
+			// update access list
+			tail->tail = F_newAccessList(next, NULL);
+			tail = tail->tail;
+
+			// update templist
+			if (next->kind == inReg) {
+				if (tmptail) {
+					tmptail->tail = Temp_TempList(next->u.reg, NULL);
+					tmptail = tmptail->tail;
+				}
+				else {
+					tmplist = Temp_TempList(next->u.reg, NULL);
+					tmptail = tmplist;
+				}
+			}
+
+		}
 	}
 	ret->formals = list;
-	ret->locals = NULL;
 	ret->temps = tmplist;
 	return ret;
 }
@@ -220,6 +255,7 @@ F_access F_allocLocal (F_frame f, bool escape)
 {
 	F_access ret = (F_access) checked_malloc(sizeof(struct F_access_));
 	if (escape) {
+		f->frameSize += F_wordSize;
 		ret->kind = inFrame;
 		F_accessList list = f->locals;
 		int i = 0;
@@ -227,19 +263,22 @@ F_access F_allocLocal (F_frame f, bool escape)
 			i++;
 			list = list->tail;
 		}
-		ret->u.offset = -F_wordSize * i - F_wordSize;
+		ret->u.offset = -F_wordSize * i;
 		f->locals = F_newAccessList(ret, f->locals);
-		/*
-		 * NO NEED !
-		// allocate a space in frame for variable
-		f->formals = U_BoolList(escape, f->formals);
-		 */
 	}
 	else {
-		ret->kind = inReg;
-		Temp_temp newtmp = Temp_newtemp();
-		ret->u.reg = newtmp;
-		f->temps = Temp_TempList(newtmp, f->temps);
+		ret = F_inReg(Temp_newtemp());
+		// f->temps = Temp_TempList(ret->u.reg, f->temps);
+		Temp_tempList tail = f->temps;
+		while (tail && tail->tail) {
+			tail = tail->tail;
+		}
+		if (tail) {
+			tail->tail = Temp_TempList(ret->u.reg, NULL);
+		}
+		else {
+			f->temps = Temp_TempList(ret->u.reg, NULL);
+		}
 	}
 	return ret;
 }
@@ -283,24 +322,76 @@ T_exp F_Exp(F_access acc, T_exp framePtr)
 	assert(0);
 }
 
-F_access F_offset(F_access acc, const int offset)
-{
-	if (acc->kind != inFrame) {
-		// inFrame expected
-		assert(0);
-	}
-	F_access newacc = (F_access) checked_malloc(sizeof(struct F_access_));
-	newacc->kind = inFrame;
-	newacc->u.offset = acc->u.offset - offset;
-	return newacc;
-}
-
 T_exp F_externalCall(string s, T_expList args) {
 	return T_Call(T_Name(Temp_namedlabel(s)), args);
 }
 
 T_stm F_procEntryExit1(F_frame frame, T_stm stm)
 {
-	// TODO:
-	return stm;
+	U_boolList bl = frame->formalEscapeList;
+	bl = bl->tail;
+	int idx = 0;
+	Temp_tempList mregs = calleeSaves();
+	T_stm epilogue = NULL;
+	while (bl && mregs) {
+		if (bl->head && idx < 6) {
+			T_stm s = T_Move(
+								 T_Mem(
+									T_Binop(T_plus, 
+									 T_Const(F_wordSize * idx), T_Temp(F_FP()))), 
+								 T_Temp(mregs->head));
+			if (epilogue) epilogue = T_Seq(epilogue, s);
+			else epilogue = s;
+		}
+		bl = bl->tail;
+		mregs = mregs->tail;
+		idx++;
+	}
+
+	// save callee-saved register
+	Temp_tempList saves = calleeSaves();
+	while (saves) {
+		F_access acc = F_allocLocal(frame, TRUE);
+		T_stm s = T_Move(F_Exp(acc, T_Temp(F_FP())), T_Temp(saves->head));
+		if (epilogue)
+			epilogue = T_Seq(epilogue, s);
+		else
+			epilogue = s;
+		saves = saves->tail;
+	}
+	return T_Seq(epilogue, stm);
 }
+
+static Temp_tempList returnSink = NULL;
+
+Temp_tempList callerSaves()
+{
+	return Temp_TempList(r10, Temp_TempList(r11, NULL));
+}
+Temp_tempList calleeSaves()
+{
+	return Temp_TempList(rbx, 
+					Temp_TempList(rbp, 
+						Temp_TempList(r12, 
+							Temp_TempList(r13, 
+								Temp_TempList(r14, 
+									Temp_TempList(r15, NULL))))));
+}
+AS_instrList F_procEntryExit2(AS_instrList body)
+{
+	if (!returnSink) returnSink = Temp_TempList(
+		rax, Temp_TempList(F_FP(), calleeSaves()));
+	return AS_splice(body, 
+	AS_InstrList(AS_Oper("", NULL, returnSink, NULL), NULL));
+}
+
+AS_proc F_procEntryExit3(F_frame frame, AS_instrList body)
+{
+	char buf[100];
+	sprintf(buf, "PROCEDURE %s\n", S_name(frame->name));
+	char epi[100];
+	sprintf(epi, "%s\n\t.L14_framesize\t%ld\nEND\n",
+					Temp_labelstring(Temp_newlabel()), frame->frameSize);
+	return AS_Proc(String(buf), body, String(epi));
+}
+

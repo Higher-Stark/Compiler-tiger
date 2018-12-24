@@ -7,6 +7,9 @@
 #include "tree.h"
 #include "assem.h"
 
+extern const int F_wordSize;
+extern const int F_reg_amount;
+
 typedef struct F_frame_ *F_frame;
 
 typedef struct F_access_ *F_access;
@@ -17,6 +20,8 @@ struct F_accessList_ {F_access head; F_accessList tail;};
 Temp_map F_tempMap;
 
 void init_tempMap();
+
+Temp_tempList hardregisters();
 
 Temp_temp r(int i);
 
@@ -32,13 +37,15 @@ F_accessList F_formals(F_frame f);
 
 Temp_temp F_FP(void);
 
-Temp_temp F_RV(void);
+Temp_temp F_SP(void);
 
-extern const int F_wordSize;
+Temp_temp F_RV(void);
 
 T_exp F_Exp(F_access acc, T_exp framePtr);
 
 F_access F_offset(F_access acc, const int offset);
+
+int F_inFrameOffset(F_access acc);
 
 T_exp F_externalCall(string s, T_expList args);
 

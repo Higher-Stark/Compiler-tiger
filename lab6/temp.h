@@ -13,6 +13,11 @@ int Temp_int(Temp_temp);
 typedef struct Temp_tempList_ *Temp_tempList;
 struct Temp_tempList_ { Temp_temp head; Temp_tempList tail;};
 Temp_tempList Temp_TempList(Temp_temp h, Temp_tempList t);
+Temp_tempList Temp_append(Temp_tempList list, Temp_temp t);
+Temp_tempList Temp_splice(Temp_tempList head, Temp_tempList tail);
+Temp_tempList Temp_Replace(Temp_tempList list, Temp_temp oldt, Temp_temp newt);
+Temp_tempList Temp_remove(Temp_tempList list, Temp_temp t);
+bool inTemplist(Temp_tempList tl, Temp_temp t);
 
 typedef S_symbol Temp_label;
 Temp_label Temp_newlabel(void);

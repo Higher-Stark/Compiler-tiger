@@ -17,4 +17,13 @@ Temp_temp Live_gtemp(G_node n);
 
 struct Live_graph Live_liveness(G_graph flow);
 
+/* 
+ * some set operation
+ */
+bool inMoveList(Live_moveList mvlist, G_node src, G_node dst);
+bool set_equal(Temp_tempList left, Temp_tempList right);
+Temp_tempList difference(Temp_tempList left, Temp_tempList right);
+Temp_tempList intersect(Temp_tempList left, Temp_tempList right);
+Temp_tempList aggregate(Temp_tempList left, Temp_tempList right);
+bool has(Temp_tempList tl, Temp_temp t);
 #endif

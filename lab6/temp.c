@@ -49,7 +49,65 @@ Temp_temp Temp_newtemp(void)
  return p;
 }
 
+Temp_tempList Temp_append(Temp_tempList list, Temp_temp t)
+{
+  Temp_tempList p = list;
+  while (p && p->tail) {
+    p = p->tail;
+  }
+  if (!p) {
+    if (t)
+    return Temp_TempList(t, NULL);
+    else return NULL;
+  }
+  p->tail = Temp_TempList(t, NULL);
+  return list;
+}
 
+Temp_tempList Temp_splice(Temp_tempList head, Temp_tempList tail)
+{
+  Temp_tempList p = head;
+  while (p && p->tail) {
+    p = p->tail;
+  }
+  if (!p) return tail;
+  else {
+    p->tail = tail;
+  }
+  return head;
+}
+
+Temp_tempList Temp_Replace(Temp_tempList list, Temp_temp oldt, Temp_temp newt)
+{
+  Temp_tempList ret = NULL;
+  for (Temp_tempList cursor = list; cursor; cursor = cursor->tail) {
+    if (cursor->head == oldt) {
+      ret = Temp_splice(ret, Temp_TempList(newt, NULL));
+    }
+    else {
+      ret = Temp_splice(ret, Temp_TempList(oldt, NULL));
+    }
+  }
+  return ret;
+}
+
+Temp_tempList Temp_remove(Temp_tempList list, Temp_temp t)
+{
+  Temp_tempList ret = NULL;
+  for (Temp_tempList l = list; l; l = l->tail) {
+    if (l->head == t) continue;
+    ret = Temp_append(ret, l->head);
+  }
+  return ret;
+}
+
+bool inTemplist(Temp_tempList tl, Temp_temp t)
+{
+	for (Temp_tempList l = tl; l; l = l->tail) {
+		if (t == l->head) return TRUE;
+	}
+	return FALSE;
+}
 
 struct Temp_map_ {TAB_table tab; Temp_map under;};
 

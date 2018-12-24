@@ -279,19 +279,7 @@ Tr_exp Tr_noop()
 // translate a simple variable into a translated expression
 Tr_exp Tr_simpleVar(Tr_access acc, Tr_level l)
 {
-	// TODO:
 	T_exp ret = NULL;
-	/*
-	if (acc->level != l) {
-		Tr_level cursor = l;
-		ret = F_Exp(F_formals(l->frame)->head, T_Temp(F_FP()));
-		while (cursor != acc->level) {
-			ret = F_Exp(F_formals(l->frame)->head, ret);
-			cursor = cursor->parent;
-		}
-
-	}
-	*/
 
 	Tr_level cursor = l;
 	ret = T_Temp(F_FP());
@@ -431,7 +419,6 @@ Tr_exp Tr_intExp(int d)
 Tr_exp Tr_strExp(string s)
 {
 	Temp_label sl = Temp_newlabel();
-	// TODO:
 	F_frag str = F_StringFrag(sl, s);
 	return Tr_Ex(T_Name(sl));
 }

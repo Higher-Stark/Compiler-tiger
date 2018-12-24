@@ -12,6 +12,7 @@
 /*Lab5: Your implementation here.*/
 
 const int F_wordSize = 8;
+const int F_reg_amount = 16;
 
 // frame contains a Symbol indicates function name 
 // and a list of argument and local  variable
@@ -139,6 +140,32 @@ void init_tempMap()
 	Temp_enter(calleesaves, r14, "%%r14");
 	r15 = Temp_newtemp();
 	Temp_enter(calleesaves, r15, "%%r15");
+}
+
+Temp_tempList hardregisters()
+{
+	if (rax && rcx && rdx && rbx && 
+			rsi && rdi && rsp && rbp && 
+			r8  && r9  && r10 && r11 && 
+			r12 && r13 && r14 && r15) {
+		return 	Temp_TempList(rax, 
+					 	Temp_TempList(rcx, 
+						Temp_TempList(rdx, 
+						Temp_TempList(rbx, 
+						Temp_TempList(rsi, 
+						Temp_TempList(rdi, 
+						Temp_TempList(rsp, 
+						Temp_TempList(rbp, 
+						Temp_TempList(r8, 
+						Temp_TempList(r9, 
+						Temp_TempList(r10, 
+						Temp_TempList(r11, 
+						Temp_TempList(r12, 
+						Temp_TempList(r13, 
+						Temp_TempList(r14, 
+						Temp_TempList(r15, NULL)
+						)))))))))))))));
+	}
 }
 
 Temp_temp r(int i)
@@ -297,8 +324,12 @@ Temp_temp F_FP(void)
 	return rbp;
 }
 
+Temp_temp F_SP(void)
+{
+	return rsp;
+}
+
 /*
- * TODO:
  * return the location where return value is to be stored
  */
 Temp_temp F_RV(void)
@@ -320,6 +351,12 @@ T_exp F_Exp(F_access acc, T_exp framePtr)
 		}
 	}
 	assert(0);
+}
+
+int F_inFrameOffset(F_access acc)
+{
+	assert(acc->kind == inFrame);
+	return acc->u.offset;
 }
 
 T_exp F_externalCall(string s, T_expList args) {

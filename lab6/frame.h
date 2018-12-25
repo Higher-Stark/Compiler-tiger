@@ -41,6 +41,8 @@ Temp_temp F_SP(void);
 
 Temp_temp F_RV(void);
 
+Temp_map F_registerMap(void);
+
 T_exp F_Exp(F_access acc, T_exp framePtr);
 
 F_access F_offset(F_access acc, const int offset);

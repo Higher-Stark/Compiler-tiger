@@ -142,13 +142,27 @@ void init_tempMap()
 	Temp_enter(calleesaves, r15, "%%r15");
 }
 
+Temp_map F_registerMap(void)
+{
+	static Temp_map map = NULL;
+	if (!map) return map;
+	map = Temp_empty();
+	map = Temp_layerMap(map, specialregs);
+	map = Temp_layerMap(map, argregs);
+	map = Temp_layerMap(map, calleesaves);
+	map = Temp_layerMap(map, callersaves);
+	return map;
+}
+
 Temp_tempList hardregisters()
 {
+	static Temp_tempList list = NULL;
+	if (!list) return list;
 	if (rax && rcx && rdx && rbx && 
 			rsi && rdi && rsp && rbp && 
 			r8  && r9  && r10 && r11 && 
 			r12 && r13 && r14 && r15) {
-		return 	Temp_TempList(rax, 
+		list = Temp_TempList(rax, 
 					 	Temp_TempList(rcx, 
 						Temp_TempList(rdx, 
 						Temp_TempList(rbx, 

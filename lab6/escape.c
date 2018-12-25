@@ -73,7 +73,6 @@ static void traverseDec(S_table env, int depth, A_dec d);
 static void traverseVar(S_table env ,int depth, A_var v);
 
 void Esc_findEscape(A_exp exp) {
-	// TODO:
     S_table env = S_empty();
     S_beginScope(env);
     int mainDepth=1;
@@ -91,7 +90,6 @@ void Esc_findEscape(A_exp exp) {
  */
 static void traverseExp(S_table env, int depth, A_exp e)
 {
-    // TODO:
     switch(e->kind) {
         case A_varExp: {
             traverseVar(env, depth, e->u.var);
@@ -185,7 +183,6 @@ static void traverseExp(S_table env, int depth, A_exp e)
  */
 static void traverseDec(S_table env, int depth, A_dec d)
 {
-    // TODO:
     switch(d->kind) {
         case A_varDec: {
             traverseExp(env, depth, d->u.var.init);
@@ -225,7 +222,6 @@ static void traverseDec(S_table env, int depth, A_dec d)
  */
 static void traverseVar(S_table env, int depth, A_var v)
 {
-    // TODO:
     switch(v->kind) {
         case A_simpleVar: {
             escapeEntry en = S_look(env, v->u.simple);

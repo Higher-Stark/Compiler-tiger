@@ -131,11 +131,14 @@ struct RA_result RA_regAlloc(F_frame f, AS_instrList il) {
 
 		Build(il, &g_live);
 
+#if _DEBUG_
+		RA_degreeDump();
+#endif
+
 		MakeWorkList();
 
 #if _DEBUG_
 		RA_worklistMovesDump();
-		RA_degreeDump();
 #endif
 
 		while (simplifyWorklist != NULL || worklistMoves != NULL || freezeWorklist != NULL || spillWorklist != NULL ) {
@@ -170,10 +173,7 @@ struct RA_result RA_regAlloc(F_frame f, AS_instrList il) {
 bool isPrecolored(G_node n)
 {
 	Temp_temp t = Live_gtemp(n);
-	for (Temp_tempList l = hardregisters(); l; l = l->tail) {
-		if (t == l->head) return TRUE;
-	}
-	return FALSE;
+	return inTemplist(hardregisters(), t);
 }
 
 /*
@@ -273,13 +273,12 @@ bool MoveRelated(G_node n)
  */
 void Simplify()
 {
-	for (G_nodeList l = simplifyWorklist; l; l = l->tail) {
-		selectStack = G_NodeList(l->head, selectStack);
-		for (G_nodeList adj = Adjacent(l->head); adj; adj = adj->tail) {
-			DecrementDegree(adj->head);
-		}
+	selectStack = G_NodeList(simplifyWorklist->head, selectStack);
+	for (G_nodeList adj = Adjacent(simplifyWorklist->head); adj; adj = adj->tail)
+	{
+		DecrementDegree(adj->head);
 	}
-	simplifyWorklist = NULL;
+	simplifyWorklist = simplifyWorklist->tail;
 }
 
 /* 
@@ -307,7 +306,7 @@ void EnableMoves(G_nodeList nodes)
 	for (G_nodeList l = nodes; l; l = l->tail) {
 		for (Live_moveList m = NodeMoves(l->head); m; m = m->tail) {
 			if (inMoveList(activeMoves, m->src, m->dst)) {
-				L_remove(activeMoves, m->src, m->dst);
+				activeMoves = L_remove(activeMoves, m->src, m->dst);
 				worklistMoves = L_aggregate(worklistMoves, Live_MoveList(m->src, m->dst, NULL));
 			}
 		}
@@ -319,44 +318,43 @@ void EnableMoves(G_nodeList nodes)
  */
 void Coalesce() 
 {
-	for (Live_moveList m = worklistMoves; m; m = m->tail) {
-		G_node x = GetAlias(m->src);
-		G_node y = GetAlias(m->dst);
-		G_node u = NULL, v = NULL;
-		if (isPrecolored(y)) {
-			u = y; v = x;
+	Live_moveList m = worklistMoves;
+	G_node x = GetAlias(m->src);
+	G_node y = GetAlias(m->dst);
+	G_node u = NULL, v = NULL;
+	if (isPrecolored(y)) {
+		u = y; v = x;
+	}
+	else {
+		u = x; v = y;
+	}
+	worklistMoves = L_remove(worklistMoves, m->src, m->dst);
+	if (u == v) {
+		coalescedMoves = L_aggregate(coalescedMoves, Live_MoveList(m->src, m->dst, NULL));
+		AddWorkList(u);
+	}
+	else if (isPrecolored(v) || G_inNodeList(u, G_adj(v))) {
+		constrainedMoves = L_aggregate(constrainedMoves, Live_MoveList(m->src, m->dst, NULL));
+		AddWorkList(u);
+		AddWorkList(v);
+	}
+	else if (isPrecolored(u)) {
+		G_nodeList adjs = Adjacent(v);
+		bool flag = TRUE;
+		for (G_nodeList adjs = Adjacent(v); adjs; adjs = adjs->tail) {
+			flag = flag && OK(adjs->head, u);
 		}
-		else {
-			u = x; v = y;
-		}
-		L_remove(worklistMoves, m->src, m->dst);
-		if (u == v) {
+		if (flag || !isPrecolored(u) && 
+		Conservative(N_aggregate(Adjacent(u), Adjacent(v)))) {
 			coalescedMoves = L_aggregate(coalescedMoves, Live_MoveList(m->src, m->dst, NULL));
+			Combine(u, v);
 			AddWorkList(u);
 		}
-		else if (isPrecolored(v) || G_inNodeList(u, G_adj(v))) {
-			constrainedMoves = L_aggregate(constrainedMoves, Live_MoveList(m->src, m->dst, NULL));
-			AddWorkList(u);
-			AddWorkList(v);
-		}
-		else if (isPrecolored(u)) {
-			G_nodeList adjs = Adjacent(v);
-			bool flag = TRUE;
-			for (G_nodeList adjs = Adjacent(v); adjs; adjs = adjs->tail) {
-				flag = flag && OK(adjs->head, u);
-			}
-			if (flag || !isPrecolored(u) && 
-			Conservative(N_aggregate(Adjacent(u), Adjacent(v)))) {
-				coalescedMoves = L_aggregate(coalescedMoves, Live_MoveList(m->src, m->dst, NULL));
-				Combine(u, v);
-				AddWorkList(u);
-			}
-			else goto elsee;
-		}
-		else {
-		elsee:
-			activeMoves = L_aggregate(activeMoves, Live_MoveList(m->src, m->dst, NULL));
-		}
+		else goto elsee;
+	}
+	else {
+	elsee:
+		activeMoves = L_aggregate(activeMoves, Live_MoveList(m->src, m->dst, NULL));
 	}
 }
 
@@ -367,7 +365,7 @@ void Coalesce()
 void AddWorkList(G_node u)
 {
 	int d = (int) TAB_look(degree, u);
-	if (!G_inNodeList(u, freezeWorklist) && ! MoveRelated(u) && d < K) {
+	if (!isPrecolored(u) && ! MoveRelated(u) && d < K) {
 		freezeWorklist = N_remove(freezeWorklist, u);
 		simplifyWorklist = N_aggregate(simplifyWorklist, G_NodeList(u, NULL));
 	}
@@ -444,7 +442,7 @@ void Combine(G_node u, G_node v)
 
 /* 
  * Function: Freeze
- * Description: do Freeze
+ * Description: Select a low degree node and freeze moves instruction related
  */
 void Freeze()
 {
@@ -458,7 +456,7 @@ void Freeze()
 			deg = dd;
 		}
 	}
-	N_remove(freezeWorklist, u);
+	freezeWorklist = N_remove(freezeWorklist, u);
 	simplifyWorklist = N_aggregate(simplifyWorklist, G_NodeList(u, NULL));
 	FreezeMoves(u);
 }
@@ -909,11 +907,14 @@ int IndexColor(string c)
 void degree_print(G_node key, int value)
 {
 	Temp_temp t = G_nodeInfo(key);
+	int r = Temp_int(t);
 	if (isPrecolored(key)) {
 		string s = Temp_look(color, G_nodeInfo(key));
 		fprintf(file, "| %s | %d |\n", s, value);
 	}
-	fprintf(file, "| t<%d> | %d |\n", Temp_int(G_nodeInfo(key)), value);
+	else
+		fprintf(file, "| t<%d> | %d |\n", Temp_int(G_nodeInfo(key)), value);
+	(void *)r;
 }
 
 void RA_degreeDump()

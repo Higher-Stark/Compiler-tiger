@@ -27,3 +27,17 @@ Temp_tempList intersect(Temp_tempList left, Temp_tempList right);
 Temp_tempList aggregate(Temp_tempList left, Temp_tempList right);
 bool has(Temp_tempList tl, Temp_temp t);
 #endif
+
+#ifndef _DEBUG_
+#define _DEBUG_ 1
+#endif
+
+#if _DEBUG_
+
+extern FILE *file;
+void Live_mdump(FILE *out, Live_moveList mvList);
+/*
+ * Live move dump
+ */
+void Live_mprint(G_node src, G_node dst);
+#endif

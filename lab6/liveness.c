@@ -276,16 +276,16 @@ struct Live_graph Live_liveness(G_graph flow) {
 	while (update) {
 		update = FALSE;
 
-		#if _DEBUG_
+#if _DEBUG_
 		file = fopen("__DEBUG_G_.md", "a");
 		fprintf(file, "## Cycle %4d\n", debug_cycle);
 		fprintf(file, "| Key | value |\n");
 		fprintf(file, "| :--: | :--: |\n");
-		TAB_dump(inTab, (void (*)(void *, void *))dump_map);   // TODO:
+		TAB_dump(inTab, (void (*)(void *, void *))dump_map); // TODO:
 		fprintf(file, "-------------\n");
 		fclose(file);
 		debug_cycle++;
-		#endif
+#endif
 
 		for (G_nodeList cursor = stack; cursor; cursor = cursor->tail)
 		{
@@ -380,4 +380,30 @@ struct Live_graph Live_liveness(G_graph flow) {
 	return lg;
 }
 
+#if _DEBUG_
+void Live_mdump(FILE *out, Live_moveList mvList)
+{
+	for (Live_moveList cur = mvList; cur; cur = cur->tail) {
+		Live_mprint(cur->src, cur->dst);
+		fprintf(out, "\n");
+	}
+}
 
+void Live_mprint(G_node src, G_node dst)
+{
+	if (inTemplist(hardregisters(), G_nodeInfo(src))) {
+		string s = Temp_look(F_tempMap, G_nodeInfo(src));
+		fprintf(file, "| %s |", s);
+	}
+	else {
+		fprintf(file, "| t<%d> |", Temp_int(G_nodeInfo(src)));
+	}
+	if (inTemplist(hardregisters(), G_nodeInfo(dst))) {
+		string s = Temp_look(F_tempMap, G_nodeInfo(dst));
+		fprintf(file, " %s |", s);
+	}
+	else {
+		fprintf(file, " t<%d> |", Temp_int(G_nodeInfo(dst)));
+	}
+}
+#endif

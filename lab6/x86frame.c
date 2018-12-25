@@ -109,43 +109,43 @@ void init_tempMap()
 	calleesaves = Temp_empty();
 	callersaves = Temp_empty();
 	rax = Temp_newtemp();
-	Temp_enter(specialregs, rax, "%%rax");
+	Temp_enter(specialregs, rax, "%rax");
 	rcx = Temp_newtemp();
-	Temp_enter(argregs, rcx, "%%rcx");
+	Temp_enter(argregs, rcx, "%rcx");
 	rdx = Temp_newtemp();
-	Temp_enter(argregs, rdx, "%%rdx");
+	Temp_enter(argregs, rdx, "%rdx");
 	rbx = Temp_newtemp();
-	Temp_enter(calleesaves, rbx, "%%rbx");
+	Temp_enter(calleesaves, rbx, "%rbx");
 	rsi = Temp_newtemp();
-	Temp_enter(argregs, rsi, "%%rsi");
+	Temp_enter(argregs, rsi, "%rsi");
 	rdi = Temp_newtemp();
-	Temp_enter(argregs, rdi, "%%rdi");
+	Temp_enter(argregs, rdi, "%rdi");
 	rsp = Temp_newtemp();
-	Temp_enter(specialregs, rsp, "%%rsp");
+	Temp_enter(specialregs, rsp, "%rsp");
 	rbp = Temp_newtemp();
-	Temp_enter(calleesaves, rbp, "%%rbp");
+	Temp_enter(calleesaves, rbp, "%rbp");
 	r8 = Temp_newtemp();
-	Temp_enter(argregs, r8, "%%r8");
+	Temp_enter(argregs, r8, "%r8");
 	r9 = Temp_newtemp();
-	Temp_enter(argregs, r9, "%%r9");
+	Temp_enter(argregs, r9, "%r9");
 	r10 = Temp_newtemp();
-	Temp_enter(callersaves, r10, "%%r10");
+	Temp_enter(callersaves, r10, "%r10");
 	r11 = Temp_newtemp();
-	Temp_enter(callersaves, r11, "%%r11");
+	Temp_enter(callersaves, r11, "%r11");
 	r12 = Temp_newtemp();
-	Temp_enter(calleesaves, r12, "%%r12");
+	Temp_enter(calleesaves, r12, "%r12");
 	r13 = Temp_newtemp();
-	Temp_enter(calleesaves, r13, "%%r13");
+	Temp_enter(calleesaves, r13, "%r13");
 	r14 = Temp_newtemp();
-	Temp_enter(calleesaves, r14, "%%r14");
+	Temp_enter(calleesaves, r14, "%r14");
 	r15 = Temp_newtemp();
-	Temp_enter(calleesaves, r15, "%%r15");
+	Temp_enter(calleesaves, r15, "%r15");
 }
 
 Temp_map F_registerMap(void)
 {
 	static Temp_map map = NULL;
-	if (!map) return map;
+	if (map) return map;
 	map = Temp_empty();
 	map = Temp_layerMap(map, specialregs);
 	map = Temp_layerMap(map, argregs);
@@ -157,7 +157,7 @@ Temp_map F_registerMap(void)
 Temp_tempList hardregisters()
 {
 	static Temp_tempList list = NULL;
-	if (!list) return list;
+	if (list) return list;
 	if (rax && rcx && rdx && rbx && 
 			rsi && rdi && rsp && rbp && 
 			r8  && r9  && r10 && r11 && 

@@ -42,6 +42,7 @@ static AS_instrList iList = NULL, last = NULL;
 Temp_tempList L(Temp_temp h, Temp_tempList t) 
 { 
   assert(h);
+  if (inTemplist(t, h)) return t;
   return Temp_TempList(h, t);
 }
 /*
@@ -82,7 +83,6 @@ AS_instrList F_codegen(F_frame f, T_stmList stmList) {
  * Function: munchExp
  * Description: maximal munch to process T_exp
  */
-// TODO: maximal munch 
 static Temp_temp munchExp(T_exp e) {
   // for storing assembly instruction
   string buf = (string) malloc(ASSEMLEN);
@@ -317,7 +317,10 @@ void C_Jump(T_stm s)
 {
   // assert(s->u.JUMP.exp->kind == T_NAME);
 
-  string buf = (string) checked_malloc(ASSEMLEN);
+  char buf[ASSEMLEN];
+  sprintf(buf, "jmp\t%s", Temp_labelstring(s->u.JUMP.exp->u.NAME));
+  emit(AS_Oper(String(buf), NULL, NULL, AS_Targets(s->u.JUMP.jumps)));
+  /* 
   if (s->u.JUMP.exp->kind == T_NAME) {
     sprintf(buf, "jmp\t%s", S_name(s->u.JUMP.exp->u.NAME));
     // TODO: jumps not needed?
@@ -327,6 +330,7 @@ void C_Jump(T_stm s)
     sprintf(buf, "jmp\t`j0");
     emit(AS_Oper(buf, NULL, NULL, AS_Targets(s->u.JUMP.jumps)));
   }
+  */
 }
 
 /* 
@@ -341,7 +345,7 @@ void C_Cjump(T_stm s)
   T_exp left = s->u.CJUMP.left, right = s->u.CJUMP.right;
   Temp_temp lefttmp = munchExp(left), righttmp = munchExp(right);
   string compare = (string) checked_malloc(ASSEMLEN);
-  sprintf(compare, "cmp\t`s0, `s1");
+  sprintf(compare, "cmp\t`s1, `s0");
   emit(AS_Oper(compare, NULL, L(lefttmp, L(righttmp, NULL)), NULL));
   switch(s->u.CJUMP.op) {
     case T_eq: sprintf(buf, "je\t`j0"); break;
@@ -355,7 +359,10 @@ void C_Cjump(T_stm s)
     case T_ugt: sprintf(buf, "ja\t`j0"); break;
     case T_uge: sprintf(buf, "jae\t`j0"); break;
   }
-  emit(AS_Oper(buf, NULL, NULL, AS_Targets(Temp_LabelList(s->u.CJUMP.true, NULL))));
+  emit(AS_Oper(buf, NULL, NULL, 
+        AS_Targets(
+          Temp_LabelList(s->u.CJUMP.true, 
+            Temp_LabelList(s->u.CJUMP.false, NULL)))));
 }
 
 /* 
@@ -428,7 +435,6 @@ Temp_temp C_Binop(T_exp e)
       sprintf(buf, "%s\t`s0", opbuf);
       emit(AS_Oper(buf, L(F_RV(), NULL), L(tmp, NULL), NULL));
     }
-    // FIXME: return %rax
     return F_RV();
   }
   else {
@@ -593,7 +599,6 @@ Temp_temp C_Temp(T_exp e)
  */
 Temp_temp C_Eseq(T_exp e)
 {
-  // TODO:
   munchStm(e->u.ESEQ.stm);
   return munchExp(e->u.ESEQ.exp);
 }
@@ -605,7 +610,6 @@ Temp_temp C_Eseq(T_exp e)
  */
 Temp_temp C_Name(T_exp e)
 {
-  // TODO:
   char buf[ASSEMLEN];
   Temp_temp r = Temp_newtemp();
   sprintf(buf, "movq\t$%s, `d0", Temp_labelstring(e->u.NAME));
@@ -635,7 +639,7 @@ Temp_temp C_Call(T_exp e)
   assert(e->u.CALL.fun->kind == T_NAME);
 
   // TODO: can calldefs be optimized
-  Temp_tempList calldefs = Temp_TempList(F_RV(), callerSaves());
+  Temp_tempList calldefs = L(F_RV(), callerSaves());
   Temp_tempList l = munchArgs(0, e->u.CALL.args);
   string buf = (string) checked_malloc(ASSEMLEN);
   sprintf(buf, "call\t%s", S_name(e->u.CALL.fun->u.NAME));
@@ -643,17 +647,4 @@ Temp_temp C_Call(T_exp e)
   Temp_temp r = Temp_newtemp();
   emit(AS_Move("movq\t`s0, `d0", L(r, NULL), L(F_RV(), NULL)));
   return r;
-}
-
-Temp_tempList Temp_splice(Temp_tempList prev, Temp_tempList succ)
-{
-  if (prev) {
-    Temp_tempList last = prev;
-    while (last->tail) last = last->tail;
-    last->tail = succ;
-  }
-  else {
-    prev = succ;
-  }
-  return prev;
 }

@@ -14,6 +14,29 @@
 #include "errormsg.h"
 #include "table.h"
 
+#if _DEBUG_
+FILE *file = NULL;
+
+void printAssem(AS_instr ins)
+{
+	switch(ins->kind) {
+		case I_LABEL: {
+			fprintf(file, " | Label - %s |", Temp_labelstring(ins->u.LABEL.label));
+			return;
+		}
+		case I_MOVE: {
+			fprintf(file, " | MOVE - %s |", ins->u.MOVE.assem);
+			return;
+		}
+		case I_OPER: {
+			fprintf(file, " | OPER - %s |", ins->u.MOVE.assem);
+			return;
+		}
+	}
+	assert(0);
+}
+#endif
+
 Temp_tempList FG_def(G_node n) {
 	//your code here.
 	AS_instr ins =  (AS_instr)G_nodeInfo(n);
@@ -61,76 +84,68 @@ void *Ins_look(Ins_table t, AS_instr ins)
 	return TAB_look(t, ins);
 }
 
+G_nodeList push(G_nodeList q, G_node n)
+{
+	return G_NodeList(n, q);
+}
+
 G_graph FG_AssemFlowGraph(AS_instrList il, F_frame f) {
 	//your code here.
 	G_graph graph = G_Graph();
-	G_table gtable = G_empty();
-	// instruction - node table
-	Ins_table instr_node = Ins_empty();
+	// jump nodes
+	G_nodeList queue = NULL;
 	// lael - node table
-	TAB_table label_node = TAB_empty();
-	AS_instrList inslist = il;
-	G_node prevnode = NULL;
-	AS_instrList pending = NULL;
+	TAB_table labelTab = TAB_empty();
 	/* 
 	 * Add edge between two instructions
 	 * * if jump instruction, add edge between targets and jump instruction
 	 * * if not, add edge to previous one
 	 */
-	while (inslist) {
-		G_node n = G_Node(graph, inslist->head);
-		Ins_enter(instr_node, inslist->head, n);
-		if (inslist->head->kind == I_LABEL) {
-			TAB_enter(label_node, inslist->head->u.LABEL.label, n);
+	G_node last = NULL;
+	for (AS_instrList inss = il; inss; inss = inss->tail) {
+		G_node n = G_Node(graph, inss->head);
+		/* Label */
+		if (inss->head->kind == I_LABEL) {
+			TAB_enter(labelTab, inss->head->u.LABEL.label, n);
+			last = n;
 		}
-		if (prevnode) {
-			G_addEdge(prevnode, n);
-		}
-		prevnode = n;
-
-		// add edge to jump target instruction
-		if (inslist->head->kind == I_OPER) {
-			bool ispending = FALSE;
-			AS_targets astargets = inslist->head->u.OPER.jumps;
-			Temp_labelList tars = NULL;
-			if (astargets) tars = astargets->labels;
-
-			while (tars) {
-				G_node jump = TAB_look(label_node, tars->head);
-				// if no node mapping to label, put the instruction to pending queue
-				// add edge when all instruction has a node mapping to
-				if (!jump && !ispending) {
-					pending = AS_InstrList(inslist->head, pending);
-				}
-				else if (jump) {
-					G_addEdge(n, jump);
-				}
-				tars = tars->tail;
+		/* jump and non-jump */
+		else if (inss->head->kind == I_OPER) {
+			if (inss->head->u.OPER.jumps) {
+				queue = push(queue, n);
+				last = NULL;
+			}
+			else {
+				G_addEdge(last, n);
+				last = n;
 			}
 		}
-		inslist = inslist->tail;
+		/* Move */
+		else {
+			G_addEdge(last, n);
+			last = n;
+		}
+	}
+	while (queue) {
+		G_node n = queue->head;
+		queue = queue->tail;
+		AS_instr ins = G_nodeInfo(n);
+		Temp_labelList labelList = ins->u.OPER.jumps->labels;
+		for (Temp_labelList labels = labelList; labels; labels = labels->tail) {
+			G_node target = (G_node) TAB_look(labelTab, labels->head);
+			assert(G_inNodeList(target, G_nodes(graph)));
+			G_addEdge(n, target);
+		}
 	}
 
-	// deal with pending instruction
-	AS_instrList cursor = pending;
-	while (cursor) {
-		G_node n = Ins_look(instr_node, cursor->head);
-		G_nodeList succ = G_succ(n);
-
-		AS_targets tgs = cursor->head->u.OPER.jumps;
-		Temp_labelList tars = tgs->labels;
-		while (tars) {
-			G_node jump = TAB_look(label_node, tars->head);
-			if (!jump) {
-				fprintf(stderr, "label %s not found!", Temp_labelstring(tars->head));
-				assert(0);
-			}
-			if (!G_inNodeList(jump, succ)) {
-				G_addEdge(n, jump);
-			}
-			tars = tars->tail;
-		}
-		cursor = cursor->tail;
-	}
+#if _DEBUG_
+	file = fopen("__DEBUG_.md", "w");
+	fprintf(file, "# Flow Graph\n");
+	fprintf(file, "| Node index | successor | Node Info |\n");
+	fprintf(file, "| ---: | :--- | :---- |\n");
+	G_show(file, G_nodes(graph), (void (*)(void *))printAssem);
+	fprintf(file, "-------------------------\n");
+	fclose(file);
+#endif
 	return graph;
 }

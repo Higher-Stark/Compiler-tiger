@@ -9,7 +9,7 @@
 
 extern const int F_wordSize;
 extern const int F_reg_amount;
-
+extern Temp_label framesizeLabel;
 typedef struct F_frame_ *F_frame;
 
 typedef struct F_access_ *F_access;
@@ -33,6 +33,8 @@ Temp_label F_name(F_frame f);
 
 F_access F_allocLocal (F_frame f, bool escape);
 
+void F_allocOutgoing(F_frame f, int outCnt);
+
 F_accessList F_formals(F_frame f);
 
 Temp_temp F_FP(void);
@@ -41,7 +43,11 @@ Temp_temp F_SP(void);
 
 Temp_temp F_RV(void);
 
+Temp_temp F_RDX(void);
+
 Temp_map F_registerMap(void);
+
+string F_literal(int i);
 
 T_exp F_Exp(F_access acc, T_exp framePtr);
 
@@ -54,6 +60,8 @@ T_exp F_externalCall(string s, T_expList args);
 Temp_tempList callerSaves();
 
 Temp_tempList calleeSaves();
+
+Temp_tempList F_argregs();
 
 T_stm F_procEntryExit1(F_frame frame, T_stm stm);
 

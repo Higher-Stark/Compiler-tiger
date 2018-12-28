@@ -264,7 +264,6 @@ struct Live_graph Live_liveness(G_graph flow) {
 	fclose(file);
 #endif
 
-	// liveness analysis
 #if _DEBUG_
 	int debug_cycle = 0;
 	file = fopen("__DEBUG_G_.md", "a");
@@ -272,6 +271,7 @@ struct Live_graph Live_liveness(G_graph flow) {
 	fclose(file);
 #endif
 
+	// liveness analysis
 	bool update = TRUE;
 	while (update) {
 		update = FALSE;

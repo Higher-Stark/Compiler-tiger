@@ -139,7 +139,7 @@ G_graph FG_AssemFlowGraph(AS_instrList il, F_frame f) {
 	}
 
 #if _DEBUG_
-	file = fopen("__DEBUG_.md", "w");
+	file = fopen("__DEBUG_.md", "a");
 	fprintf(file, "# Flow Graph\n");
 	fprintf(file, "| Node index | successor | Node Info |\n");
 	fprintf(file, "| ---: | :--- | :---- |\n");

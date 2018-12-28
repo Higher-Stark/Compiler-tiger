@@ -48,24 +48,26 @@ static void doProc(FILE *out, F_frame frame, T_stm body)
  struct C_block blo;
 
  F_tempMap = Temp_empty();
+ F_tempMap = Temp_layerMap(F_tempMap, F_registerMap());
 
  printf("doProc for function %s:\n", S_name(F_name(frame)));
- printStmList(stdout, T_StmList(body, NULL));
+ // printStmList(stdout, T_StmList(body, NULL));
  printf("-------====IR tree=====-----\n");
 
  stmList = C_linearize(body);
- printStmList(stdout, stmList);
+ // printStmList(stdout, stmList);
  printf("-------====Linearlized=====-----\n");
 
  blo = C_basicBlocks(stmList);
  C_stmListList stmLists = blo.stmLists;
+ /*
  for (; stmLists; stmLists = stmLists->tail) {
  	printStmList(stdout, stmLists->head);
 	printf("------====Basic block=====-------\n");
- }
+ }*/
 
  stmList = C_traceSchedule(blo);
- printStmList(stdout, stmList);
+ // printStmList(stdout, stmList);
  printf("-------====trace=====-----\n");
  iList  = F_codegen(frame, stmList); /* 9 */
 
@@ -77,7 +79,7 @@ static void doProc(FILE *out, F_frame frame, T_stm body)
 
  proc =	F_procEntryExit3(frame, ra.il);
 
- fprintf(out, "BEGIN function\n");
+ // fprintf(out, "BEGIN function\n");
  string procName = S_name(F_name(frame));
  fprintf(out, ".text\n");
  fprintf(out, ".globl %s\n", procName);
@@ -91,7 +93,7 @@ static void doProc(FILE *out, F_frame frame, T_stm body)
  AS_printInstrList (out, proc->body,
                        Temp_layerMap(F_tempMap, ra.coloring));
  fprintf(out, "%s", proc->epilog);
- fprintf(out, "END function\n");
+ // fprintf(out, "END function\n");
 
  //Part of TA's implementation. Just for reference.
  /*

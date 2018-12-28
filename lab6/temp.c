@@ -85,7 +85,7 @@ Temp_tempList Temp_Replace(Temp_tempList list, Temp_temp oldt, Temp_temp newt)
       ret = Temp_splice(ret, Temp_TempList(newt, NULL));
     }
     else {
-      ret = Temp_splice(ret, Temp_TempList(oldt, NULL));
+      ret = Temp_splice(ret, Temp_TempList(cursor->head, NULL));
     }
   }
   return ret;

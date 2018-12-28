@@ -18,9 +18,8 @@ static Temp_temp munchExp(T_exp e);
 static void munchStm(T_stm s);
 static Temp_tempList munchArgs(int cnt, T_expList args);
 Temp_tempList L(Temp_temp h, Temp_tempList t); 
-Temp_tempList memAddr(T_exp mem, string assem, bool issrc);
-int getMemAddr(T_exp mem, bool isdst, string addrbuf, Temp_tempList *tmpList, int baseIdx);
 Temp_tempList Temp_splice(Temp_tempList prev, Temp_tempList succ);
+void rerange(T_binOp op, T_exp left_old, T_exp right_old, T_exp *left, T_exp *right);
 
 void C_Move(T_stm s);
 void C_Seq(T_stm s);
@@ -120,55 +119,6 @@ static Temp_temp munchExp(T_exp e) {
   assert(0);
 }
 
-/* 
- * Function: getMemAddr
- * Description: get memory address in form of IMM(REG),
- * addrbuf and tmpList is returned value
- */
-int getMemAddr(T_exp mem, bool isdst, string addrbuf, Temp_tempList *tmpList, int baseIdx)
-{
-  char ch = isdst ? 'd' : 's';
-  if (mem->kind == T_BINOP && mem->u.BINOP.op == T_plus) {
-    T_exp leftexp = mem->u.BINOP.left, rightexp = mem->u.BINOP.right;
-    if (leftexp->kind == T_CONST && rightexp->kind == T_TEMP) {
-      sprintf(addrbuf, "%d(`%c%d)", leftexp->u.CONST, ch, baseIdx);
-      *tmpList = L(rightexp->u.TEMP, NULL);
-      return 1;
-    }
-    else if (leftexp->kind == T_TEMP && rightexp->kind == T_CONST) {
-      sprintf(addrbuf, "%d(`%c%d)", rightexp->u.CONST, ch, baseIdx);
-      *tmpList = L(leftexp->u.TEMP, NULL);
-      return 1;
-    }
-    else {
-      Temp_temp transfer = munchExp(mem);
-      sprintf(addrbuf, "0x0(`%c%d)", ch, baseIdx);
-      *tmpList = L(transfer, NULL);
-      return 1;
-    }
-  }
-  else if (mem->kind == T_TEMP) {
-    sprintf(addrbuf, "0x0(`%c%d)", ch, baseIdx);
-    *tmpList = L(mem->u.TEMP, NULL);
-    return 1;
-  }
-  else if (mem->kind == T_CONST) {
-    Temp_temp transfer = Temp_newtemp();
-    string loadConst = (string) checked_malloc(ASSEMLEN);
-    sprintf(loadConst, "movq\t%d, `d0", mem->u.CONST);
-    emit(AS_Move(loadConst, L(transfer, NULL), NULL));
-    sprintf(addrbuf, "0x0(`%c%d)", ch, baseIdx);
-    *tmpList = L(transfer, NULL);
-    return 1;
-  }
-  else {
-    sprintf(addrbuf, "0x0(`%c%d)", ch, baseIdx);
-    *tmpList = L(munchExp(mem), NULL);
-    return 1;
-  }
-  return 0;
-}
-
 static void munchStm(T_stm s)
 {
   string buf = (string) checked_malloc(ASSEMLEN);
@@ -207,35 +157,50 @@ static void munchStm(T_stm s)
  */
 Temp_tempList munchArgs(int cnt, T_expList args)
 {
-  T_expList e = args;
-  int cursor = 0;
-  while (e && cursor < cnt) {
-    e = e->tail;
-    cursor++;
+  if (!args) return NULL;
+  Temp_tempList ret = munchArgs(cnt + 1, args->tail);
+  if (cnt == 0) {
+    Temp_temp src = munchExp(args->head);
+    emit(AS_Oper("movq\t`s1, (%rsp)", NULL, L(F_FP(), L(src, NULL)), NULL));
+    return ret;
   }
-  if (!e) return NULL;
-
-  string dest = NULL;
-  Temp_temp destreg = NULL;
-  if (cnt > 0 && cnt <= 6) {
-    dest = name_r(cnt);
-    destreg = r(cnt);
-  }
-  else if (cnt == 0) {
-    dest = "-8(%rsp)";
+  if (cnt <= 6) {
+    Temp_temp dst = r(cnt);
+    char buf[ASSEMLEN];
+    if (args->head->kind == T_CONST) {
+      sprintf(buf, "movq\t$0x%x, `d0", args->head->u.CONST);
+      emit(AS_Oper(String(buf), L(dst, NULL), NULL, NULL));
+    }
+    else if (args->head->kind == T_NAME) {
+      sprintf(buf, "movq\t$%s, `d0", Temp_labelstring(args->head->u.NAME));
+      emit(AS_Oper(String(buf), L(dst, NULL), NULL, NULL));
+    }
+    else {
+      Temp_temp src = munchExp(args->head);
+      sprintf(buf, "movq\t`s0, `d0");
+      emit(AS_Move(String(buf), L(dst, NULL), L(src, NULL)));
+    }
+    return L(dst, ret);
   }
   else {
-    dest = (string) checked_malloc(16);
-    sprintf(dest, "-%d(%%rsp)", F_wordSize * cnt - 5);
+    char buf[ASSEMLEN];
+    if (args->head->kind == T_CONST) {
+      sprintf(buf, "movq\t0x%x, %d(%%rsp)", 
+      args->head->u.CONST, F_wordSize * (cnt - 6));
+      emit(AS_Oper(String(buf), NULL, L(F_SP(), NULL), NULL));
+    }
+    else if (args->head->kind == T_NAME) {
+      sprintf(buf, "movq\t$%s, %d(%%rsp)", 
+      Temp_labelstring(args->head->u.NAME), F_wordSize * (cnt - 6));
+      emit(AS_Oper(String(buf), NULL, L(F_SP(), NULL), NULL));
+    }
+    else {
+      Temp_temp src = munchExp(args->head);
+      sprintf(buf, "movq\t`s1, %d(%%rsp)", F_wordSize * (cnt - 6));
+      emit(AS_Oper(String(buf), NULL, L(F_SP(), L(src, NULL)), NULL));
+    }
+    return ret;
   }
-  string buf = (string)checked_malloc(ASSEMLEN);
-  sprintf(buf, "movq\t`s0, %s", dest);
-  Temp_temp r = munchExp(e->head);
-  Temp_tempList rr = NULL;
-  if (destreg)
-    rr = L(destreg, NULL);
-  emit(AS_Move(buf, rr, L(r, NULL)));
-  return rr;
 }
 
 /*
@@ -250,39 +215,300 @@ Temp_tempList munchArgs(int cnt, T_expList args)
  */
 void C_Move(T_stm s) 
 {
-  string buf = (string) checked_malloc(ASSEMLEN);
-  char instr[8] = "movq";
-  char movsrc[16], movdst[16];
+  char buf[ASSEMLEN];
   T_exp dst = s->u.MOVE.dst, src = s->u.MOVE.src;
-  Temp_tempList dsttmps = NULL, srctmps = NULL;
   assert(dst->kind == T_TEMP || dst->kind == T_MEM);
 
-  // generate destination part
+  // Move Const -> Temp
+  if (src->kind == T_CONST && dst->kind == T_TEMP) {
+    sprintf(buf, "movq\t$%d, `d0", src->u.CONST);
+    emit(AS_Oper(String(buf), L(dst->u.TEMP, NULL), NULL, NULL));
+    return;
+  } 
+  // Move Name -> Temp
+  if(src->kind == T_NAME && dst->kind == T_TEMP) {
+    sprintf(buf, "movq\t$%s, `d0", Temp_labelstring(src->u.NAME));
+    emit(AS_Oper(String(buf), L(dst->u.TEMP, NULL), NULL, NULL));
+    return;
+  }
+  // Move Mem -> Temp
+  if (src->kind == T_MEM && dst->kind == T_TEMP) {
+    if (src->u.MEM->kind == T_TEMP) {
+      sprintf(buf, "movq\t(`s0), `d0");
+      emit(AS_Oper(String(buf), L(dst->u.TEMP, NULL), L(src->u.MEM->u.TEMP, NULL), NULL));
+      return;
+    }
+    else if (src->u.MEM->kind == T_BINOP && src->u.MEM->u.BINOP.op == T_plus) {
+      T_exp left = NULL, right = NULL;
+      rerange(src->u.MEM->u.BINOP.op, src->u.MEM->u.BINOP.left,
+              src->u.MEM->u.BINOP.right, &left, &right);
+      if (!left) {
+        // right is a CONST
+        Temp_temp transfer = munchExp(right);
+        sprintf(buf, "movq\t(`s0), `d0");
+        emit(AS_Oper(String(buf), L(dst->u.TEMP, NULL), L(transfer, NULL), NULL));
+        return;
+      }
+      else if (left->kind == T_CONST) {
+        if (right->kind == T_TEMP) {
+          sprintf(buf, "movq\t0x%x(`s0), `d0", left->u.CONST);
+          emit(AS_Oper(String(buf), L(dst->u.TEMP, NULL), L(right->u.TEMP, NULL), NULL));
+          return;
+        }
+        else {
+          Temp_temp transfer = munchExp(right);
+          sprintf(buf, "movq\t0x%x(`s0), `d0", left->u.CONST);
+          emit(AS_Oper(String(buf), L(dst->u.TEMP, NULL), L(transfer, NULL), NULL));
+          return;
+        }
+      }
+      else if (left->kind == T_NAME) {
+        if (right->kind == T_TEMP) {
+          sprintf(buf, "movq\t%s(`s0), `d0", Temp_labelstring(left->u.NAME));
+          emit(AS_Oper(String(buf), L(dst->u.TEMP, NULL), L(right->u.TEMP, NULL), NULL));
+          return;
+        }
+        else {
+          Temp_temp transfer = munchExp(right);
+          sprintf(buf, "movq\t%s(`s0), `d0", Temp_labelstring(left->u.NAME));
+          emit(AS_Oper(String(buf), L(dst->u.TEMP, NULL), L(transfer, NULL), NULL));
+          return;
+        }
+      }
+      else {
+        Temp_temp transfer = munchExp(src->u.MEM);
+        sprintf(buf, "movq\t(`s0), `d0");
+        emit(AS_Oper(String(buf), L(dst->u.TEMP, NULL), L(transfer, NULL), NULL));
+        return;
+      }
+    }
+    else {
+      Temp_temp transfer = munchExp(src->u.MEM);
+      sprintf(buf, "movq\t(`s0), `d0");
+      emit(AS_Oper(String(buf), L(dst->u.TEMP, NULL), L(transfer, NULL), NULL));
+      return;
+    }
+  } 
+  // Move else -> Temp
   if (dst->kind == T_TEMP) {
-    sprintf(movdst, "`d0");
-    dsttmps = L(dst->u.TEMP, NULL);
-  }
-  else {
-    // Move memory to memory is not allowed
-    assert(src->kind != T_MEM);
-    getMemAddr(dst, TRUE, movdst, &dsttmps, 0);
+    Temp_temp transfer = munchExp(src);
+    sprintf(buf, "movq\t`s0, `d0");
+    emit(AS_Move(String(buf), L(dst->u.TEMP, NULL), L(transfer, NULL)));
+    return;
   }
 
-  // generate source part
-  if (src->kind == T_TEMP) {
-    sprintf(movsrc, "`s0");
-    srctmps = L(src->u.TEMP, NULL);
-  }
-  else if (src->kind == T_MEM) {
-    getMemAddr(src, FALSE, movsrc, &srctmps, 0);
-  }
-  else {
-    srctmps = L(munchExp(src), NULL);
-    sprintf(movsrc, "`s0");
+  // Move Const -> Mem
+  if (src->kind == T_CONST && dst->kind == T_MEM) {
+    if (dst->u.MEM->kind == T_TEMP) {
+      sprintf(buf, "movq\t$%d, (`s0)", src->u.CONST);
+      emit(AS_Oper(String(buf), NULL, L(dst->u.MEM->u.TEMP, NULL), NULL));
+      return;
+    }
+    else if (dst->u.MEM->kind == T_BINOP && dst->u.MEM->u.BINOP.op == T_plus) {
+      // TODO:
+      T_exp left = NULL, right = NULL;
+      rerange(dst->u.MEM->u.BINOP.op, dst->u.MEM->u.BINOP.left,
+              dst->u.MEM->u.BINOP.right, &left, &right);
+      if (!left) {
+        Temp_temp transfer = munchExp(right);
+        sprintf(buf, "movq\t$%d, (`s0)", src->u.CONST);
+        emit(AS_Oper(String(buf), NULL, L(transfer, NULL), NULL));
+        return;
+      }
+      else if (left->kind == T_CONST) {
+        if (right->kind == T_TEMP) {
+          sprintf(buf, "movq\t$%d, 0x%x(`s0)", src->u.CONST, left->u.CONST);
+          emit(AS_Oper(String(buf), NULL, L(right->u.TEMP, NULL), NULL));
+          return;
+        }
+        else {
+          Temp_temp transfer = munchExp(right);
+          sprintf(buf, "movq\t$%d, 0x%x(`s0)", src->u.CONST, left->u.CONST);
+          emit(AS_Oper(String(buf), NULL, L(transfer, NULL), NULL));
+          return;
+        }
+      }
+      else if (left->kind == T_NAME) {
+        if (right->kind == T_TEMP) {
+          sprintf(buf, "movq\t$%d, %s(`s0)", src->u.CONST, Temp_labelstring(left->u.NAME));
+          emit(AS_Oper(String(buf), NULL, L(right->u.TEMP, NULL), NULL));
+          return;
+        }
+        else {
+          Temp_temp transfer = munchExp(right);
+          sprintf(buf, "movq\t$%d, %s(`s0)", src->u.CONST, Temp_labelstring(left->u.NAME));
+          emit(AS_Oper(String(buf), NULL, L(transfer, NULL), NULL));
+          return;
+        }
+      }
+      else {
+        Temp_temp transfer = munchExp(dst->u.MEM);
+        sprintf(buf, "movq\t$%d, (`s0)", src->u.CONST);
+        emit(AS_Oper(String(buf), NULL, L(transfer, NULL), NULL));
+        return;
+      }
+    }
   }
 
-  sprintf(buf, "%s\t%s, %s", instr, movsrc, movdst);
-  emit(AS_Move(buf, dsttmps, srctmps));
+  // Move Name -> Mem
+  if (src->kind == T_NAME && dst->kind == T_MEM) {
+    if (dst->u.MEM->kind == T_TEMP) {
+      sprintf(buf, "movq\t$%s, (`s0)", Temp_labelstring(src->u.NAME));
+      emit(AS_Oper(String(buf), NULL, L(dst->u.MEM->u.TEMP, NULL), NULL));
+      return;
+    }
+    else if (dst->u.MEM->kind == T_BINOP && dst->u.MEM->u.BINOP.op == T_plus) {
+      T_exp left = NULL, right = NULL;
+      rerange(dst->u.MEM->u.BINOP.op, dst->u.MEM->u.BINOP.left,
+              dst->u.MEM->u.BINOP.right, &left, &right);
+      if (!left) {
+        Temp_temp transfer = munchExp(right);
+        sprintf(buf, "movq\t$%s, (`s0)", Temp_labelstring(src->u.NAME));
+        emit(AS_Oper(String(buf), NULL, L(transfer, NULL), NULL));
+        return;
+      }
+      else if (left->kind == T_CONST) {
+        if (right->kind == T_TEMP) {
+          sprintf(buf, "movq\t$%s, 0x%x(`s0)", Temp_labelstring(src->u.NAME), left->u.CONST);
+          emit(AS_Oper(String(buf), NULL, L(right->u.TEMP, NULL), NULL));
+          return;
+        }
+        else {
+          Temp_temp transfer = munchExp(right);
+          sprintf(buf, "movq\t$%s, 0x%x(`s0)", Temp_labelstring(src->u.NAME), left->u.CONST);
+          emit(AS_Oper(String(buf), NULL, L(transfer, NULL), NULL));
+          return;
+        }
+      }
+      else if (left->kind == T_NAME) {
+        if (right->kind == T_TEMP) {
+          sprintf(buf, "movq\t$%s, %s(`s0)", Temp_labelstring(src->u.NAME), Temp_labelstring(left->u.NAME));
+          emit(AS_Oper(String(buf), NULL, L(right->u.TEMP, NULL), NULL));
+          return;
+        }
+        else {
+          Temp_temp transfer = munchExp(right);
+          sprintf(buf, "movq\t$%s, %s(`s0)", Temp_labelstring(src->u.NAME), Temp_labelstring(left->u.NAME));
+          emit(AS_Oper(String(buf), NULL, L(transfer, NULL), NULL));
+          return;
+        }
+      }
+      else {
+        Temp_temp transfer = munchExp(dst->u.MEM);
+        sprintf(buf, "movq\t$%s, (`s0)", Temp_labelstring(src->u.NAME));
+        emit(AS_Oper(String(buf), NULL, L(transfer, NULL), NULL));
+        return;
+      }
+    }
+  }
+
+  // Move Temp -> Mem
+  if (src->kind == T_TEMP && dst->kind == T_MEM) {
+    if (dst->u.MEM->kind == T_TEMP) {
+      sprintf(buf, "movq\t`s0, (`s1)");
+      emit(AS_Oper(String(buf), NULL, L(src->u.TEMP, L(dst->u.MEM->u.TEMP, NULL)), NULL));
+      return;
+    }
+    else if (dst->u.MEM->kind == T_BINOP && dst->u.MEM->u.BINOP.op == T_plus) {
+      // TODO:
+      T_exp left = NULL, right = NULL;
+      rerange(dst->u.MEM->u.BINOP.op, dst->u.MEM->u.BINOP.left,
+              dst->u.MEM->u.BINOP.right, &left, &right);
+      if (!left) {
+        Temp_temp transfer = munchExp(right);
+        sprintf(buf, "movq\t`s0, (`s1)");
+        emit(AS_Oper(String(buf), NULL, L(src->u.TEMP, L(transfer, NULL)), NULL));
+        return;
+      }
+      else if (left->kind == T_CONST) {
+        if (right->kind == T_TEMP) {
+          sprintf(buf, "movq\t`s0, 0x%x(`s1)", left->u.CONST);
+          emit(AS_Oper(String(buf), NULL, L(src->u.TEMP, L(right->u.TEMP, NULL)), NULL));
+          return;
+        }
+        else {
+          Temp_temp transfer = munchExp(right);
+          sprintf(buf, "movq\t`s0, 0x%x(`s1)", left->u.CONST);
+          emit(AS_Oper(String(buf), NULL, L(src->u.TEMP, L(transfer, NULL)), NULL));
+          return;
+        }
+      }
+      else if (left->kind == T_NAME) {
+        if (right->kind == T_TEMP) {
+          sprintf(buf, "movq\t`s0, %s(`s1)", Temp_labelstring(left->u.NAME));
+          emit(AS_Oper(String(buf), NULL, L(src->u.TEMP, L(right->u.TEMP, NULL)), NULL));
+          return;
+        }
+        else {
+          Temp_temp transfer = munchExp(right);
+          sprintf(buf, "movq\t`s0, %s(`s1)", Temp_labelstring(left->u.NAME));
+          emit(AS_Oper(String(buf), NULL, L(src->u.TEMP, L(transfer, NULL)), NULL));
+          return;
+        }
+      }
+      else {
+        Temp_temp transfer = munchExp(dst->u.MEM);
+        sprintf(buf, "movq\t`s0, (`s1)");
+        emit(AS_Oper(String(buf), NULL, L(src->u.TEMP, L(transfer, NULL)), NULL));
+        return;
+      }
+    }
+  }
+
+  // Move else -> Mem
+  if (dst->kind == T_MEM) {
+    Temp_temp transfer = munchExp(src);
+    if (dst->u.MEM->kind == T_TEMP) {
+      sprintf(buf, "movq\t`s0, (`s1)");
+      emit(AS_Oper(String(buf), NULL, L(transfer, L(dst->u.MEM->u.TEMP, NULL)), NULL));
+      return;
+    }
+    else if (dst->u.MEM->kind == T_BINOP && dst->u.MEM->u.BINOP.op == T_plus) {
+      // TODO:
+      T_exp left = NULL, right = NULL;
+      rerange(dst->u.MEM->u.BINOP.op, dst->u.MEM->u.BINOP.left,
+              dst->u.MEM->u.BINOP.right, &left, &right);
+      if (!left) {
+        Temp_temp tmp = munchExp(right);
+        sprintf(buf, "movq\t`s0, (`s1)");
+        emit(AS_Oper(String(buf), NULL, L(transfer, L(tmp, NULL)), NULL));
+        return;
+      }
+      else if (left->kind == T_CONST) {
+        if (right->kind == T_TEMP) {
+          sprintf(buf, "movq\t`s0, 0x%x(`s1)", left->u.CONST);
+          emit(AS_Oper(String(buf), NULL, L(transfer, L(right->u.TEMP, NULL)), NULL));
+          return;
+        }
+        else {
+          Temp_temp tmp = munchExp(right);
+          sprintf(buf, "movq\t`s0, 0x%x(`s1)", left->u.CONST);
+          emit(AS_Oper(String(buf), NULL, L(transfer, L(tmp, NULL)), NULL));
+          return;
+        }
+      }
+      else if (left->kind == T_NAME) {
+        if (right->kind == T_TEMP) {
+          sprintf(buf, "movq\t`s0, %s(`s1)", Temp_labelstring(left->u.NAME));
+          emit(AS_Oper(String(buf), NULL, L(transfer, L(right->u.TEMP, NULL)), NULL));
+          return;
+        }
+        else {
+          Temp_temp tmp = munchExp(right);
+          sprintf(buf, "movq\t`s0, %s(`s1)", Temp_labelstring(left->u.NAME));
+          emit(AS_Oper(String(buf), NULL, L(transfer, L(tmp, NULL)), NULL));
+          return;
+        }
+      }
+      else {
+        Temp_temp tmp = munchExp(dst->u.MEM);
+        sprintf(buf, "movq\t`s0, (`s1)");
+        emit(AS_Oper(String(buf), NULL, L(transfer, L(tmp, NULL)), NULL));
+        return;
+      }
+    }
+  }
+  assert(0);
 }
 
 /* 
@@ -320,17 +546,6 @@ void C_Jump(T_stm s)
   char buf[ASSEMLEN];
   sprintf(buf, "jmp\t%s", Temp_labelstring(s->u.JUMP.exp->u.NAME));
   emit(AS_Oper(String(buf), NULL, NULL, AS_Targets(s->u.JUMP.jumps)));
-  /* 
-  if (s->u.JUMP.exp->kind == T_NAME) {
-    sprintf(buf, "jmp\t%s", S_name(s->u.JUMP.exp->u.NAME));
-    // TODO: jumps not needed?
-    emit(AS_Oper(buf, NULL, NULL, NULL));
-  }
-  else {
-    sprintf(buf, "jmp\t`j0");
-    emit(AS_Oper(buf, NULL, NULL, AS_Targets(s->u.JUMP.jumps)));
-  }
-  */
 }
 
 /* 
@@ -386,7 +601,7 @@ void C_Exp(T_stm s)
 Temp_temp C_Binop(T_exp e)
 {
   // TODO:
-  string buf = (string) checked_malloc(ASSEMLEN);
+  char buf[ASSEMLEN];
   char opbuf[6], loprand[16], roprand[16];
   Temp_tempList ltmpl = NULL, rtmpl = NULL;
 
@@ -402,114 +617,77 @@ Temp_temp C_Binop(T_exp e)
     case T_rshift: sprintf(opbuf, "shr"); break;
     case T_arshift: sprintf(opbuf, "sar"); break;
   }
-  Temp_temp transfer = Temp_newtemp();
   T_exp left = e->u.BINOP.left, right = e->u.BINOP.right;
   if (e->u.BINOP.op == T_mul || e->u.BINOP.op == T_div) {
-    // TODO: imulq S / idivq S, 
-    if (left->kind == T_TEMP) {
-      if (left->u.TEMP != F_RV())
-        emit(AS_Move("movq\t`s0, %rax", L(F_RV(), NULL), L(left->u.TEMP, NULL)));
+    // imul S / idivq S
+    if (!(left->kind == T_TEMP && left->u.TEMP == F_RV())) {
+      emit(AS_Move("movq\t`s0, %rax", L(F_RV(), NULL), L(left->u.TEMP, NULL)));
     }
-    else if (left->kind == T_MEM) {
-      getMemAddr(left, FALSE, loprand, &ltmpl, 0);
-      char buf[ASSEMLEN];
-      sprintf(buf, "movq\t%s, %%rax", loprand);
-      emit(AS_Move(String(buf), L(F_RV(), NULL), ltmpl));
-    }
-    else {
-      Temp_temp tmp = munchExp(left);
-      emit(AS_Move("movq\t`s0, %rax", L(F_RV(), NULL), L(tmp, NULL)));
-    }
-
-    if (right->kind == T_TEMP) {
-      sprintf(buf, "%s\t`s0", opbuf);
-      emit(AS_Oper(buf, L(F_RV(), NULL), L(right->u.TEMP, NULL), NULL));
-    }
-    else if (right->kind == T_MEM) {
-      getMemAddr(right, FALSE, roprand, &rtmpl, 0);
-      sprintf(buf, "%s\t%s", opbuf, roprand);
-      emit(AS_Oper(buf, L(F_RV(), NULL), rtmpl, NULL));
-    }
-    else {
-      Temp_temp tmp = munchExp(right);
-      sprintf(buf, "%s\t`s0", opbuf);
-      emit(AS_Oper(buf, L(F_RV(), NULL), L(tmp, NULL), NULL));
-    }
-    return F_RV();
+    sprintf(buf, "%s\t`s0", opbuf);
+    emit(AS_Oper(buf, L(F_RV(), L(F_RDX(), NULL)), L(munchExp(right), L(F_RV(), NULL)), NULL));
+    Temp_temp ret = Temp_newtemp();
+    emit(AS_Move("movq\t%rax, `d0", L(F_RV(), NULL), L(ret, NULL)));
+    return ret;
   }
   else {
-    if (left->kind == T_TEMP) {
-      assert(right->kind != T_NAME);
-      if (right->kind == T_TEMP) {
-        emit(AS_Move("movq\t`s1, `d0", L(left->u.TEMP, NULL), L(left->u.TEMP, L(right->u.TEMP, NULL))));
-      }
-      else transfer = munchExp(right);
-      sprintf(buf, "%s\t`s1, `d0", opbuf);
-      emit(AS_Oper(buf, L(left->u.TEMP, NULL), L(left->u.TEMP, L(transfer, NULL)), NULL));
-      return transfer;
-    }
-    else if (left->kind == T_MEM) {
-      if (right->kind == T_MEM) {
-        transfer = munchExp(left);
-        getMemAddr(right, FALSE, loprand, &ltmpl, 1);
-        sprintf(buf, "%s\t%s, `d0", opbuf, loprand);
-        emit(AS_Oper(buf, L(transfer, NULL), L(transfer, ltmpl), NULL));
-        return transfer;
-      }
-      else if (right->kind == T_TEMP) {
-        transfer = munchExp(left);
-        sprintf(buf, "%s\t`s1, `d0", opbuf);
-        emit(AS_Oper(buf, L(transfer, NULL), L(transfer, L(right->u.TEMP, NULL)), NULL));
-        return transfer;
-      }
-      else if (right->kind == T_CONST) {
-        ltmpl = L(munchExp(left), NULL);
-        sprintf(buf, "%s\t$%d, `d0", opbuf, right->u.CONST);
-        emit(AS_Oper(buf, ltmpl, ltmpl, NULL));
-        return ltmpl->head;
-      }
-      else {
-        ltmpl = L(munchExp(left), NULL);
-        rtmpl = L(munchExp(right), NULL);
-        sprintf(buf, "%s\t`s1, `d0", opbuf);
-        emit(AS_Oper(buf, ltmpl, Temp_splice(ltmpl, rtmpl), NULL));
-        return ltmpl->head;
-      }
-    }
-    else if (left->kind == T_CONST) {
-      if (right->kind == T_TEMP) {
-        emit(AS_Move("movq\t`s0, `d0", L(transfer, NULL), L(right->u.TEMP, NULL)));
-      }
-      else {
-        transfer = munchExp(right);
-      }
-      sprintf(buf, "%s\t$%d, `d0", opbuf, left->u.CONST);
-      emit(AS_Oper(buf, L(transfer, NULL), L(transfer, NULL), NULL));
-      return transfer;
-    }
-    else {
-      assert(left->kind != T_NAME);
-      ltmpl = L(munchExp(left), NULL);
-      if (right->kind == T_TEMP) {
-        rtmpl = L(right->u.TEMP, NULL);
-        sprintf(roprand, "`s1");
-      }
-      else if (right->kind == T_MEM) {
-        getMemAddr(right, FALSE, roprand, &rtmpl, 1);
-      }
-      else if (right->kind == T_CONST) {
-        sprintf(roprand, "$%d", right->u.CONST);
-      }
-      else {
-        sprintf(roprand, "`s1");
-        rtmpl = L(munchExp(right), NULL);
-      }
-      sprintf(buf, "%s\t%s, `d0", opbuf, roprand);
-      emit(AS_Oper(buf, ltmpl, Temp_splice(ltmpl, rtmpl), NULL));
-      return ltmpl->head;
-    }
+    // TODO: right can be optimized when mem
+    Temp_temp tmp = Temp_newtemp();
+    Temp_temp ret = munchExp(left);
+    emit(AS_Move("movq\t`s0, `d0", L(tmp, NULL), L(ret, NULL)));
+    sprintf(buf, "%s\t`s1, `d0", opbuf);
+    emit(AS_Oper(String(buf), L(tmp, NULL), L(tmp, L(munchExp(right), NULL)), NULL));
+    return tmp;
   }
-  assert(0);
+}
+
+void rerange(T_binOp op, T_exp left_old, T_exp right_old, T_exp *left, T_exp *right)
+{
+  if (left_old->kind == T_CONST) {
+    if (right_old->kind == T_CONST) {
+      switch(op) {
+        case T_plus: *right = T_Const(left_old->u.CONST + right_old->u.CONST); left = NULL; return;
+        case T_minus: *right = T_Const(left_old->u.CONST - right_old->u.CONST); left = NULL; return;
+        case T_mul: *right = T_Const(left_old->u.CONST * right_old->u.CONST); left = NULL; return;
+        case T_div: *right = T_Const(left_old->u.CONST / right_old->u.CONST); left = NULL; return;
+        case T_and: *right = T_Const(left_old->u.CONST & right_old->u.CONST); left = NULL; return;
+        case T_or: *right = T_Const(left_old->u.CONST | right_old->u.CONST); left = NULL; return;
+        case T_lshift: *right = T_Const(left_old->u.CONST << right_old->u.CONST); left = NULL; return;
+        case T_rshift: *right = T_Const((unsigned int)left_old->u.CONST >> right_old->u.CONST); left = NULL; return;
+        case T_arshift: *right = T_Const((signed int)left_old->u.CONST >> right_old->u.CONST); left = NULL; return;
+        case T_xor: *right = T_Const(left_old->u.CONST ^ right_old->u.CONST); left = NULL; return;
+      }
+    }
+    *left = left_old;
+    *right = right_old;
+    return;
+  }
+  if (right_old->kind == T_CONST) {
+    *left = right_old;
+    *right = left_old;
+    return;
+  }
+  if (left_old->kind == T_NAME) {
+    *left = left_old;
+    *right = right_old;
+    return;
+  }
+  if (right_old->kind == T_NAME) {
+    *left = right_old;
+    *right = left_old;
+    return;
+  }
+  if (left_old->kind == T_TEMP) {
+    *left = left_old;
+    *right = right_old;
+    return;
+  }
+  if (right_old->kind == T_TEMP) {
+    *left = right_old;
+    *right = left_old;
+  }
+  *left = left_old;
+  *right = right_old;
+  return;
 }
 
 /* 
@@ -518,69 +696,67 @@ Temp_temp C_Binop(T_exp e)
  */
 Temp_temp C_Mem(T_exp e)
 {
-  string buf = (string) checked_malloc(ASSEMLEN);
-  Temp_temp r = Temp_newtemp();
-  Temp_temp transfer = NULL;
-  T_exp mem = e->u.MEM;
-  if (mem->kind == T_BINOP) {
-    if (mem->u.BINOP.op == T_plus) {
-      if (mem->u.BINOP.left->kind == T_TEMP) {
-        if (mem->u.BINOP.right->kind == T_CONST) {
-          sprintf(buf, "leaq\t%d(`s0), `d0", mem->u.BINOP.right->u.CONST);
-          emit(AS_Oper(buf, L(r, NULL), L(mem->u.BINOP.left->u.TEMP, NULL), NULL));
-        }
-        else if (mem->u.BINOP.right->kind == T_TEMP) {
-          transfer = munchExp(mem);
-          sprintf(buf, "leaq\t0x0(`s0), `d0");
-          emit(AS_Oper(buf, L(r, NULL), L(transfer, NULL), NULL));
-        }
-        else {
-          transfer = munchExp(mem);
-          sprintf(buf, "leaq\t0x0(`s0), `d0");
-          emit(AS_Oper(buf, L(r, NULL), L(transfer, NULL), NULL));
-        }
-        return r;
-      }
-      else if (mem->u.BINOP.left->kind == T_CONST) {
-        if (mem->u.BINOP.right->kind == T_TEMP) {
-          sprintf(buf, "leaq\t%d(`s0), `d0", mem->u.BINOP.left->u.CONST);
-          emit(AS_Oper(buf, L(r, NULL), L(mem->u.BINOP.right->u.TEMP, NULL), NULL));
-        }
-        else {
-          transfer = munchExp(mem->u.BINOP.right);
-          sprintf(buf, "leaq\t%d(`s0), `d0", mem->u.BINOP.left->u.CONST);
-          emit(AS_Oper(buf, L(r, NULL), L(transfer, NULL), NULL));
-        }
-        return r;
+  char buf[ASSEMLEN];
+  if (e->u.MEM->kind == T_TEMP) {
+    Temp_temp ret = Temp_newtemp();
+    emit(AS_Oper("movq\t(`s0), `d0", L(ret, NULL), L(e->u.TEMP, NULL), NULL));
+    return ret;
+  }
+  if (e->u.MEM->kind == T_BINOP && e->u.MEM->u.BINOP.op == T_plus) {
+    T_exp left = NULL, right = NULL;
+    rerange(e->u.MEM->u.BINOP.op, e->u.MEM->u.BINOP.left, e->u.MEM->u.BINOP.right, &left, &right);
+    if (!left) {
+      sprintf(buf, "movq\t$%d, `d0", right->u.CONST);
+      Temp_temp tmp = Temp_newtemp();
+      emit(AS_Oper(String(buf), L(tmp, NULL), NULL, NULL));
+      Temp_temp ret = Temp_newtemp();
+      emit(AS_Oper("movq\t(`s0), `d0", L(ret, NULL), L(tmp, NULL), NULL));
+      return ret;
+    }
+    else if (left->kind == T_CONST ) {
+      if (right->kind == T_TEMP) {
+        Temp_temp ret = Temp_newtemp();
+        sprintf(buf, "movq\t0x%x(`s0), `d0", left->u.CONST);
+        emit(AS_Oper(String(buf), L(ret, NULL), L(right->u.TEMP, NULL), NULL));
+        return ret;
       }
       else {
-        if (mem->u.BINOP.right->kind == T_CONST) {
-          transfer = munchExp(mem->u.BINOP.left);
-          sprintf(buf, "leaq\t%d(`s0), `d0", mem->u.BINOP.right->u.CONST);
-          emit(AS_Oper(buf, L(r, NULL), L(transfer, NULL), NULL));
-        }
-        else {
-          transfer = munchExp(mem);
-          sprintf(buf, "leaq\t0x0(`s0), `d0");
-          emit(AS_Oper(buf, L(r, NULL), L(transfer, NULL), NULL));
-        }
-        return r;
+        Temp_temp transfer = munchExp(right);
+        Temp_temp ret = Temp_newtemp();
+        sprintf(buf, "movq\t0x%x(`s0), `d0", left->u.CONST);
+        emit(AS_Oper(String(buf), L(ret, NULL), L(transfer, NULL), NULL));
+        return ret;
+      }
+    }
+    else if (left->kind == T_NAME) {
+      Temp_temp ret = Temp_newtemp();
+      if (right->kind == T_TEMP) {
+        sprintf(buf, "movq\t%s(`s0), `d0", Temp_labelstring(left->u.NAME));
+        emit(AS_Oper(String(buf), L(ret, NULL), L(right->u.TEMP, NULL), NULL));
+        return ret;
+      }
+      else {
+        Temp_temp transfer = munchExp(right);
+        sprintf(buf, "movq\t%s(`s0), `d0", Temp_labelstring(left->u.NAME));
+        emit(AS_Oper(String(buf), L(ret, NULL), L(transfer, NULL), NULL));
+        return ret;
       }
     }
     else {
-      transfer = munchExp(mem);
-      sprintf(buf, "leaq\t0x0(`s0), `d0");
-      emit(AS_Oper(buf, L(r, NULL), L(transfer, NULL), NULL));
-      return r;
+      Temp_temp transfer = munchExp(e->u.MEM);
+      Temp_temp ret = Temp_newtemp();
+      sprintf(buf, "movq\t(`s0), `d0");
+      emit(AS_Oper(String(buf), L(ret, NULL), L(transfer, NULL), NULL));
+      return ret;
     }
   }
   else {
-    transfer = munchExp(mem);
-    sprintf(buf, "leaq\t0x0(`s0), `d0");
-    emit(AS_Oper(buf, L(r, NULL), L(transfer, NULL), NULL));
-    return r;
+    Temp_temp transfer = munchExp(e->u.MEM);
+    Temp_temp ret = Temp_newtemp();
+    sprintf(buf, "movq\t(`s0), `d0");
+    emit(AS_Oper(String(buf), L(ret, NULL), L(transfer, NULL), NULL));
+    return ret;
   }
-  assert(0);
 }
 
 /* 
@@ -589,6 +765,13 @@ Temp_temp C_Mem(T_exp e)
  */
 Temp_temp C_Temp(T_exp e)
 {
+  if (e->u.TEMP == F_FP()) {
+    Temp_temp ret = Temp_newtemp();
+    char buf[ASSEMLEN];
+    sprintf(buf, "leaq\t%s(%%rsp), `d0", Temp_labelstring(framesizeLabel));
+    emit(AS_Oper(String(buf), L(ret, NULL), L(F_SP(), NULL), NULL));
+    return ret;
+  }
   return e->u.TEMP;
 }
 
@@ -613,7 +796,7 @@ Temp_temp C_Name(T_exp e)
   char buf[ASSEMLEN];
   Temp_temp r = Temp_newtemp();
   sprintf(buf, "movq\t$%s, `d0", Temp_labelstring(e->u.NAME));
-  emit(AS_Move(String(buf), L(r, NULL), NULL));
+  emit(AS_Oper(String(buf), L(r, NULL), NULL, NULL));
   return r;
 }
 
@@ -625,9 +808,24 @@ Temp_temp C_Const(T_exp e)
 {
   Temp_temp r = Temp_newtemp();
   string buf = (string) checked_malloc(ASSEMLEN);
-  sprintf(buf, "movq\t$%d, `d0", e->u.CONST);
+  sprintf(buf, "movq\t$0x%x, `d0", e->u.CONST);
   emit(AS_Oper(buf, L(r, NULL), NULL, NULL));
   return r;
+}
+
+Temp_tempList caller_saves(Temp_tempList calldefs)
+{
+  if (!calldefs) return NULL;
+  Temp_temp save = Temp_newtemp();
+  emit(AS_Move("movq\t`s0, `d0", L(save, NULL), L(calldefs->head, NULL)));
+  return L(save, caller_saves(calldefs->tail));
+}
+
+void caller_restore(Temp_tempList saves, Temp_tempList calldefs)
+{
+  for (; saves && calldefs; saves = saves->tail, calldefs = calldefs->tail) {
+    emit(AS_Move("movq\t`s0, `d0", L(calldefs->head, NULL), L(saves->head, NULL)));
+  }
 }
 
 /* 
@@ -640,11 +838,13 @@ Temp_temp C_Call(T_exp e)
 
   // TODO: can calldefs be optimized
   Temp_tempList calldefs = L(F_RV(), callerSaves());
+  Temp_tempList saves = caller_saves(calldefs);
   Temp_tempList l = munchArgs(0, e->u.CALL.args);
   string buf = (string) checked_malloc(ASSEMLEN);
-  sprintf(buf, "call\t%s", S_name(e->u.CALL.fun->u.NAME));
+  sprintf(buf, "call\t%s", Temp_labelstring(e->u.CALL.fun->u.NAME));
   emit(AS_Oper(buf, calldefs, l, NULL));
   Temp_temp r = Temp_newtemp();
-  emit(AS_Move("movq\t`s0, `d0", L(r, NULL), L(F_RV(), NULL)));
+  emit(AS_Move("movq\t%rax, `d0", L(r, NULL), L(F_RV(), NULL)));
+  caller_restore(saves, calldefs);
   return r;
 }

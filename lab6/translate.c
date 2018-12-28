@@ -164,7 +164,7 @@ Tr_level Tr_newLevel(Tr_level parent, Temp_label name, U_boolList formals)
 // Transform F_accessList to Tr_accessList
 Tr_accessList Tr_formals(Tr_level level)
 {
-	// remove the first access 
+	// skip the first access the static link
 	F_accessList cursor = F_formals(level->frame)->tail;
 	if (!cursor) return NULL;
 	Tr_accessList ret = NULL;
@@ -573,9 +573,17 @@ Tr_exp Tr_breakExp(Temp_label done)
 T_expList argument(Tr_expList explist)
 {
 	T_expList ret = NULL;
+	T_expList tail = NULL;
 	Tr_expList cursor = explist;
 	while (cursor) {
-		ret = T_ExpList(unEx(cursor->head), ret);
+		if (ret) {
+			tail->tail = T_ExpList(unEx(cursor->head), NULL);
+			tail = tail->tail;
+		}
+		else {
+			ret = T_ExpList(unEx(cursor->head), NULL);
+			tail = ret;
+		}
 		cursor = cursor->tail;
 	}
 	return ret;
@@ -595,6 +603,17 @@ Tr_exp Tr_callExp(Tr_level callerlevel, Tr_level calleelevel, Temp_label name, T
 	while (cur != calleelevel->parent) {
 		link = F_Exp(F_formals(cur->frame)->head, link);
 		cur = cur->parent;
+	}
+	{
+		/*
+		 * count parameter, adjust frame size if parameters 
+		 * are too much
+		 */
+		int cnt = 0;
+		for (Tr_expList l = explist; l; l = l->tail){
+			cnt++;
+		}
+		F_allocOutgoing(callerlevel->frame, cnt);
 	}
 	return Tr_Ex(T_Call(T_Name(name), T_ExpList(link, argument(explist))));
 }

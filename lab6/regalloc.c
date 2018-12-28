@@ -15,25 +15,22 @@
 #include "temp.h"
 
 extern int ASSEMLEN;
-#define K (F_reg_amount - 2)
+#define K (F_reg_amount)
 
-static char *avail_regs[14] = {"%rax", "%rcx", "%rdx", "%rbx",
-																 "%rsi", "%rdi", "%r8", "%r9", 
-																 "%r10", "%r11", "%r12", "%r13", 
-																 "%r14", "%r15"};
-int IndexColor(string c);
+int IndexTemp(Temp_temp);
 // TODO: initialization
 // static G_graph adjSet;				// temps conflict graph
-static TAB_table degree; 			// G_node <-> degree
-static TAB_table moveList;		// G_node <-> move instruction
-static TAB_table alias;				// G_node <-> G_node  (combined)
-static Temp_map color;				// G_node <-> color
+static G_table degree; 			// G_node(temp) <-> degree
+static G_table moveList;		// G_node <-> move instruction
+static G_table alias;				// G_node(temp) <-> G_node  (combined)
+static G_table color;				// G_node(temp) <-> color
 
-static G_nodeList precolored;				// hard registers of machine
-static G_nodeList initial;					// neither colored nor handled
+// static G_nodeList precolored;				// hard registers of machine
+// static G_nodeList initial;					// neither colored nor handled
 static G_nodeList simplifyWorklist;	// low degree and no move related
 static G_nodeList freezeWorklist;		// low degree and move related
 static G_nodeList spillWorklist;		// high degree
+
 static G_nodeList spilledNodes;			// nodes to be spilled
 static G_nodeList coalescedNodes;		// set of coalesced nodes
 static G_nodeList coloredNodes;			// colored nodes
@@ -57,7 +54,7 @@ bool isPrecolored(G_node n);
 
 void Build(AS_instrList il, struct Live_graph *live);
 void AddEdge(G_node u, G_node v);
-void MakeWorkList();
+void MakeWorkList(G_graph g);
 G_nodeList Adjacent(G_node n);
 Live_moveList NodeMoves(G_node n);
 bool MoveRelated(G_node n);
@@ -75,6 +72,7 @@ void FreezeMoves(G_node u);
 void SelectSpill();
 void AssignColors();
 AS_instrList RewriteProgram(AS_instrList il_old, F_frame f, G_graph g_tmp);
+Temp_map AssignRegister(G_nodeList l);
 
 G_nodeList N_aggregate(G_nodeList u, G_nodeList v);
 G_nodeList N_intersect(G_nodeList u, G_nodeList v);
@@ -94,8 +92,7 @@ struct RA_result RA_regAlloc(F_frame f, AS_instrList il) {
 	//your code here
 	bool complete = FALSE;
 	struct RA_result ret;
-	F_tempMap = Temp_layerMap(F_tempMap, F_registerMap());
-	color = F_tempMap;
+	struct Live_graph g_live;
 
 	while (!complete) {
 		complete = TRUE;
@@ -104,15 +101,12 @@ struct RA_result RA_regAlloc(F_frame f, AS_instrList il) {
 		G_graph g_flow = FG_AssemFlowGraph(il, f);
 
 		/* Livness Analysis */
-		struct Live_graph g_live = Live_liveness(g_flow);
+		g_live = Live_liveness(g_flow);
 
-		for (G_nodeList l = G_nodes(g_live.graph); l; l = l->tail) {
-			if (!isPrecolored(l->head))
-				initial = N_aggregate(initial, G_NodeList(l->head, NULL));
-		}
 		simplifyWorklist = NULL;
 		freezeWorklist = NULL;
 		spillWorklist = NULL;
+
 		spilledNodes = NULL;
 		coalescedNodes = NULL;
 		coloredNodes = NULL;
@@ -127,7 +121,7 @@ struct RA_result RA_regAlloc(F_frame f, AS_instrList il) {
 		degree = G_empty();
 		moveList = G_empty();
 		alias = G_empty();
-		color = F_tempMap;
+		color = G_empty();
 
 		Build(il, &g_live);
 
@@ -135,13 +129,15 @@ struct RA_result RA_regAlloc(F_frame f, AS_instrList il) {
 		RA_degreeDump();
 #endif
 
-		MakeWorkList();
+		MakeWorkList(g_live.graph);
 
 #if _DEBUG_
 		RA_worklistMovesDump();
 #endif
 
-		while (simplifyWorklist != NULL || worklistMoves != NULL || freezeWorklist != NULL || spillWorklist != NULL ) {
+		while (simplifyWorklist != NULL || worklistMoves != NULL ||
+					 freezeWorklist != NULL || spillWorklist != NULL)
+		{
 			if (simplifyWorklist) Simplify();
 			else if (worklistMoves) Coalesce();
 			else if (freezeWorklist) Freeze();
@@ -161,7 +157,7 @@ struct RA_result RA_regAlloc(F_frame f, AS_instrList il) {
 			il = RewriteProgram(il, f, g_live.graph);
 		}
 	}
-	ret.coloring = color;
+	ret.coloring = AssignRegister(G_nodes(g_live.graph));
 	ret.il = il;
 	return ret;
 }
@@ -183,22 +179,34 @@ bool isPrecolored(G_node n)
 void Build(AS_instrList il, struct Live_graph *live)
 {
 	worklistMoves = live->moves;
-	for (AS_instrList ins = il; ins; ins = ins->tail) {
-		if (ins->head->kind == I_MOVE) {
-			// move related temps
-			Temp_tempList mvRtdtmps = aggregate(ins->head->u.MOVE.src, ins->head->u.MOVE.dst);
-			for (Temp_tempList mvtmps = mvRtdtmps; mvtmps; mvtmps = mvtmps->tail){
-				AS_instrList relatedIns = TAB_look(moveList, mvtmps->head);
-				relatedIns = AS_InstrList(il->head, relatedIns);
-				TAB_enter(moveList, mvtmps, relatedIns);
+	/*
+	 * initial moveList
+	 * temp <-> Live_moveList
+	 */
+	for (G_nodeList temps = G_nodes(live->graph); temps; temps = temps->tail) {
+		Live_moveList relatedMoves = NULL;
+		for (Live_moveList ml = live->moves; ml; ml = ml->tail) {
+			if (ml->src == temps->head || ml->dst == temps->head ) {
+				relatedMoves = Live_MoveList(ml->src, ml->dst, relatedMoves);
 			}
 		}
+		G_enter(moveList, temps->head, relatedMoves);
 	}
 	// initialize degree table
 	for (G_nodeList l = G_nodes(live->graph); l; l = l->tail) {
-		Temp_temp t = Live_gtemp(l->head);
 		int d = G_degree(l->head);
-		TAB_enter(degree, l->head, (void *)d);
+		G_enter(degree, l->head, (void *)d);
+	}
+	// initial color table
+	for (G_nodeList l = G_nodes(live->graph); l; l = l->tail) {
+		int c = 0;
+		Temp_temp t = Live_gtemp(l->head);
+		c = IndexTemp(t);
+		G_enter(color, l->head, (void *)c);
+	}
+	// initialize alias
+	for (G_nodeList l = G_nodes(live->graph); l; l = l->tail ){
+		G_enter(alias, l->head, l->head);
 	}
 }
 
@@ -211,12 +219,12 @@ void AddEdge(G_node u, G_node v)
 	if (!G_inNodeList(u, G_adj(v)) && u != v) {
 		G_addEdge(u, v);
 		if (!isPrecolored(u)) {
-			int d = (int) TAB_look(degree, u);
-			TAB_enter(degree, u, (void *)(d + 1));
+			int d = (int) G_look(degree, u);
+			G_enter(degree, u, (void *)(d + 1));
 		}
 		if (!isPrecolored(v)) {
-			int d = (int) TAB_look(degree, v);
-			TAB_enter(degree, v, (void *)(d + 1));
+			int d = (int) G_look(degree, v);
+			G_enter(degree, v, (void *)(d + 1));
 		}
 	}
 }
@@ -226,9 +234,9 @@ void AddEdge(G_node u, G_node v)
  * Description: classsify nodes by their degree and 
  * 							add to corresponding list
  */
-void MakeWorkList()
+void MakeWorkList(G_graph live)
 {
-	for (G_nodeList n = initial; n; n = n->tail) {
+	for (G_nodeList n = G_nodes(live); n; n = n->tail) {
 		int d = (int) TAB_look(degree, n->head);
 		if (d >= K)
 			spillWorklist = N_aggregate(spillWorklist, G_NodeList(n->head, NULL));
@@ -254,7 +262,7 @@ G_nodeList Adjacent(G_node n){
  */
 Live_moveList NodeMoves(G_node n)
 {
-	Live_moveList mvList = TAB_look(moveList, n);
+	Live_moveList mvList = G_look(moveList, n);
 	return L_intersect(mvList, L_aggregate(activeMoves, worklistMoves));
 }
 
@@ -314,13 +322,16 @@ void EnableMoves(G_nodeList nodes)
 }
 /* 
  * Function: Coalesce
- * Description: 
+ * Description: coallesce a move instruction 
+ * 							when two nodes are not move 
+ * 							related.
  */
 void Coalesce() 
 {
 	Live_moveList m = worklistMoves;
 	G_node x = GetAlias(m->src);
 	G_node y = GetAlias(m->dst);
+	assert(x && y);
 	G_node u = NULL, v = NULL;
 	if (isPrecolored(y)) {
 		u = y; v = x;
@@ -350,10 +361,10 @@ void Coalesce()
 			Combine(u, v);
 			AddWorkList(u);
 		}
-		else goto elsee;
+		else
+			activeMoves = L_aggregate(activeMoves, Live_MoveList(m->src, m->dst, NULL));
 	}
 	else {
-	elsee:
 		activeMoves = L_aggregate(activeMoves, Live_MoveList(m->src, m->dst, NULL));
 	}
 }
@@ -377,7 +388,7 @@ void AddWorkList(G_node u)
  */
 bool OK(G_node t, G_node r)
 {
-	int d = (int) TAB_look(degree, t);
+	int d = (int) G_look(degree, t);
 	bool ret = d < K;
 	ret = ret || isPrecolored(t);
 	ret = ret || G_inNodeList(r, G_adj(t));
@@ -392,7 +403,7 @@ bool Conservative(G_nodeList nodes)
 {
 	int k = 0;
 	for (G_nodeList l = nodes; l; l = l->tail) {
-		int d = (int) TAB_look(degree, l->head);
+		int d = (int) G_look(degree, l->head);
 		if (d >= K) k++;
 	}
 	return k < K;
@@ -405,7 +416,7 @@ bool Conservative(G_nodeList nodes)
 G_node GetAlias(G_node n)
 {
 	if (G_inNodeList(n, coalescedNodes)) {
-		G_node m = TAB_look(alias, n);
+		G_node m = G_look(alias, n);
 		return GetAlias(m);
 	}
 	else return n;
@@ -423,11 +434,11 @@ void Combine(G_node u, G_node v)
 	}
 	else spillWorklist = N_remove(spillWorklist, v);
 	coalescedNodes = N_aggregate(coalescedNodes, G_NodeList(v, NULL));
-	TAB_enter(alias, v, u);
-	AS_instrList u_moves = TAB_look(moveList, u);
-	AS_instrList v_moves = TAB_look(moveList, v);
-	AS_instrList uv_moves = AS_aggregate(u_moves, v_moves);
-	TAB_enter(moveList, u, uv_moves);
+	G_enter(alias, v, u);
+	Live_moveList u_moves = G_look(moveList, u);
+	Live_moveList v_moves = G_look(moveList, v);
+	Live_moveList uv_moves = L_aggregate(u_moves, v_moves);
+	G_enter(moveList, u, uv_moves);
 	EnableMoves(G_NodeList(v, NULL));
 	for (G_nodeList adjs = Adjacent(v); adjs; adjs = adjs->tail) {
 		AddEdge(adjs->head, u);
@@ -541,9 +552,9 @@ void AssignColors()
 		for (G_nodeList w = G_adj(n); w; w = w->tail) {
 			G_node alias_node = GetAlias(w->head);
 			if (G_inNodeList(alias_node, coloredNodes) || isPrecolored(alias_node)) {
-				string cc = (string) Temp_look(color, (Temp_temp) G_nodeInfo(alias_node));
-				int color_idx = IndexColor(cc);
-				okColors[color_idx] = FALSE;
+				int color_idx = (int) G_look(color, alias_node);
+				assert(color_idx);
+				okColors[color_idx - 1] = FALSE;
 			}
 		}
 		// TODO: find available color
@@ -556,14 +567,15 @@ void AssignColors()
 		}
 		else {
 			coloredNodes = N_aggregate(coloredNodes, G_NodeList(n, NULL));
-			string c = avail_regs[available];
-			Temp_enter(color, (Temp_temp) G_nodeInfo(GetAlias(n)), c);
+			
+			G_enter(color, n, (void *)available + 1);
 		}
 		selectStack = selectStack->tail;
 	}
 	for (G_nodeList n = coalescedNodes; n; n = n->tail) {
-		string c = Temp_look(color, (Temp_temp) G_nodeInfo(GetAlias(n->head)));
-		Temp_enter(color, (Temp_temp) G_nodeInfo(n->head), c);
+		G_node alias_node = GetAlias(n->head);
+		int idx = (int) G_look(color, alias_node);
+		G_enter(color, n->head, (void *)idx);
 	}
 }
 
@@ -613,10 +625,8 @@ AS_instrList RewriteProgram(AS_instrList il_old, F_frame f, G_graph g_tmp)
 			if (read) {
 				char buf[ASSEMLEN];
 				tt = Temp_newtemp();
-				sprintf(buf, "movq\t%d(%%rbp), `d0", offset);
-				newins = AS_Move(String(buf),
-												 Temp_TempList(tt, NULL),
-												 Temp_TempList(F_FP(), NULL));
+				sprintf(buf, "movq\t%d + %s(%%rsp), `d0", offset, Temp_labelstring(framesizeLabel));
+				newins = AS_Oper(String(buf), Temp_TempList(tt, NULL), NULL, NULL);
 				il_new = AS_splice(il_new, AS_InstrList(newins, NULL));
 				newins = NULL;
 			}
@@ -628,26 +638,38 @@ AS_instrList RewriteProgram(AS_instrList il_old, F_frame f, G_graph g_tmp)
 				if (!tt) tt = Temp_newtemp();
 				*pdst = Temp_Replace(*pdst, G_nodeInfo(n->head), tt);
 				char buf[ASSEMLEN];
-				sprintf(buf, "movq\t`s0, %d(%%rbp)", offset);
-				newins = AS_Move(String(buf),
-												 Temp_TempList(F_FP(), NULL),
-												 Temp_TempList(tt, NULL));
+				sprintf(buf, "movq\t`s0, %d + %s(%%rsp)", offset, Temp_labelstring(framesizeLabel));
+				newins = AS_Oper(String(buf), NULL, Temp_TempList(tt, NULL), NULL);
 			}
 			il_new = AS_splice(il_new, AS_InstrList(i->head, NULL));
 			if (newins) {
 				AS_splice(il_new, AS_InstrList(newins, NULL));
 			}
 
-			G_node ttnode = G_Node(g_tmp, tt);
-			newTemps = N_aggregate(newTemps, G_NodeList(ttnode, NULL));
+			if (tt) {
+				G_node ttnode = G_Node(g_tmp, tt);
+				newTemps = N_aggregate(newTemps, G_NodeList(ttnode, NULL));
+			}
 		}
 	}
 	spilledNodes = NULL;
-	initial = N_aggregate(coloredNodes, N_aggregate(coalescedNodes, newTemps));
+	// initial = N_aggregate(coloredNodes, N_aggregate(coalescedNodes, newTemps));
 	coloredNodes = NULL;
 	coalescedNodes = NULL;
 
 	return il_new;
+}
+
+Temp_map AssignRegister(G_nodeList l)
+{
+	Temp_map ret = Temp_empty();
+	ret = Temp_layerMap(ret, F_registerMap());
+	for (G_nodeList list = l; list; list = list->tail) {
+		int c = (int) G_look(color, list->head);
+		string sreg = F_literal(c);
+		Temp_enter(ret, Live_gtemp(list->head), sreg);
+	}
+	return ret;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -895,12 +917,14 @@ bool AS_in(AS_instrList list, AS_instr ins)
 	return FALSE;
 }
 
-int IndexColor(string c)
+int IndexTemp(Temp_temp t)
 {
-	for (int i = 0; i != K; i++) {
-		if (avail_regs[i] == c) return i;
+	int ret = 1;
+	for (Temp_tempList list = hardregisters(); list; list = list->tail) {
+		if (list->head == t) return ret;
+		ret++;
 	}
-	return -1;
+	return 0;
 }
 
 #if _DEBUG_
@@ -909,7 +933,7 @@ void degree_print(G_node key, int value)
 	Temp_temp t = G_nodeInfo(key);
 	int r = Temp_int(t);
 	if (isPrecolored(key)) {
-		string s = Temp_look(color, G_nodeInfo(key));
+		string s = Temp_look(F_registerMap(), G_nodeInfo(key));
 		fprintf(file, "| %s | %d |\n", s, value);
 	}
 	else

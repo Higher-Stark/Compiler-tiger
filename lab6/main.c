@@ -52,11 +52,11 @@ static void doProc(FILE *out, F_frame frame, T_stm body)
 
  printf("doProc for function %s:\n", S_name(F_name(frame)));
  // printStmList(stdout, T_StmList(body, NULL));
- printf("-------====IR tree=====-----\n");
+ // printf("-------====IR tree=====-----\n");
 
  stmList = C_linearize(body);
  // printStmList(stdout, stmList);
- printf("-------====Linearlized=====-----\n");
+ // printf("-------====Linearlized=====-----\n");
 
  blo = C_basicBlocks(stmList);
  C_stmListList stmLists = blo.stmLists;
@@ -68,7 +68,7 @@ static void doProc(FILE *out, F_frame frame, T_stm body)
 
  stmList = C_traceSchedule(blo);
  // printStmList(stdout, stmList);
- printf("-------====trace=====-----\n");
+ // printf("-------====trace=====-----\n");
  iList  = F_codegen(frame, stmList); /* 9 */
 
  AS_printInstrList(stdout, iList, Temp_layerMap(F_tempMap, Temp_name()));
@@ -107,6 +107,7 @@ void doStr(FILE *out, Temp_label label, string str) {
 	fprintf(out, ".section .rodata\n");
 	fprintf(out, ".%s:\n", S_name(label));
 
+  /*
 	int length = *(int *)str;
 	length = length + 4;
 	//it may contains zeros in the middle of string. To keep this work, we need to print all the charactors instead of using fprintf(str)
@@ -116,8 +117,9 @@ void doStr(FILE *out, Temp_label label, string str) {
 		fprintf(out, "%c", str[i]);
 	}
 	fprintf(out, "\"\n");
+  */
+	fprintf(out, ".string \"%s\"\n", str);
 
-	//fprintf(out, ".string \"%s\"\n", str);
 }
 
 int main(int argc, string *argv)

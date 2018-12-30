@@ -33,7 +33,7 @@ Temp_map callersaves = NULL;
 
 void init_tempMap()
 {
-	framesizeLabel = Temp_namedlabel(".L14_framesize");
+	framesizeLabel = Temp_namedlabel("L14_framesize");
 	specialregs = Temp_empty();
 	argregs = Temp_empty();
 	calleesaves = Temp_empty();
@@ -317,16 +317,42 @@ F_access F_inReg(Temp_temp reg)
 	return acc;
 }
 
-// create a new Frame with label name and formals
-// TODO: x86 only allow at most 6 formals in register
+/*
+ * Create a frame named name and has a list of formals
+ * | ... |
+ * | arg[7] |
+ * | static link |
+ * | ret addr    |
+ * ---------------
+ * | callee      |
+ * | saved       |
+ * | registers   | <- frame pointer
+ * ---------------
+ * |  caller     |
+ * | saved       |
+ * | registers   |
+ * ---------------
+ * | escaped     |
+ * | formals     |
+ * ---------------
+ * | locals      |
+ * |  ...        |
+ * ---------------
+ * | outgoing    |
+ * | args        |
+ * | static link | <- stack pointer
+ * ---------------
+ */
 F_frame F_newFrame(Temp_label name, U_boolList formals)
 {
 	F_frame ret = (F_frame) checked_malloc(sizeof (struct F_frame_));
 	ret->name = name;
-	ret->locals = NULL;
+	ret->locals = F_newAccessList(F_inFrame(-F_wordSize), 
+								F_newAccessList(F_inFrame(-F_wordSize * 2), NULL));
 	// simply assume there will be a function call
 	// in function body, one word size for static link
-	ret->frameSize = F_wordSize;
+	// another word size for return address
+	ret->frameSize = F_wordSize * (2 + 2);
 	// for static link
 	ret->outCnt = 1;
 	ret->formalEscapeList = formals;
@@ -336,7 +362,7 @@ F_frame F_newFrame(Temp_label name, U_boolList formals)
 	int fmlcnt = 1;
 
 	// static link
-	list = F_newAccessList(F_inFrame(F_wordSize), NULL);
+	list = F_newAccessList(F_inFrame(F_wordSize * 7), NULL);
 	tail = list;
 	cursor = cursor->tail;
 	{
@@ -354,7 +380,7 @@ F_frame F_newFrame(Temp_label name, U_boolList formals)
 			// more than 6 parameters
 			else {
 				// the seventh parameter is 2 work size above frame pointer
-				next = F_inFrame(F_wordSize * (fmlcnt - 5));
+				next = F_inFrame(F_wordSize * (fmlcnt + 1));
 			}
 			cursor = cursor->tail;
 			fmlcnt++;
@@ -381,7 +407,7 @@ F_access F_allocLocal (F_frame f, bool escape)
 	if (escape) {
 		f->frameSize += F_wordSize;
 		F_accessList list = f->locals;
-		int i = 0;
+		int i = 1;
 		while (list) {
 			i++;
 			list = list->tail;
@@ -448,48 +474,27 @@ T_stm F_procEntryExit1(F_frame frame, T_stm stm)
 {
 	// Save callee-saved registers
 	T_stm prologue = NULL;
-	Temp_tempList backup = NULL;
-	for (Temp_tempList regs = calleeSaves(); regs; regs = regs->tail) {
-		Temp_temp t = regs->head;
-		Temp_temp tmp = Temp_newtemp();
-		T_stm s = T_Move(T_Temp(tmp), T_Temp(t));
-		backup = Temp_append(backup, tmp);
-		if (prologue) prologue = T_Seq(prologue, s);
-		else prologue = s;
-	}
-
 	// Move escaped parameters in first 6 parameters to stack
-	int idx = 0;
+	int idx = 1;
 	Temp_tempList mregs = F_argregs();
 	U_boolList bl = frame->formalEscapeList;
 	bl = bl->tail;
-	while (bl && mregs) {
+	int cnt = 3;
+	for (U_boolList bl = frame->formalEscapeList; bl; bl = bl->tail) {
 		if (bl->head && idx < 6) {
 			T_stm s = T_Move(
-								 T_Mem(
-									T_Binop(T_plus, 
-									 T_Const(-F_wordSize * idx), T_Temp(F_FP()))), 
-								 T_Temp(mregs->head));
+				T_Mem(
+					T_Binop(T_plus, T_Const(- F_wordSize * cnt), 
+					T_Binop(T_plus, T_Name(framesizeLabel), T_Temp(F_SP())))), T_Temp(r(idx)));
+			cnt++;
 			if (prologue) prologue = T_Seq(s, prologue);
 			else prologue = s;
 		}
-		bl = bl->tail;
-		mregs = mregs->tail;
 		idx++;
 	}
 
-	// restore callee-saved registers
-	T_stm epilogue = NULL;
-	for (Temp_tempList old = backup, regs = calleeSaves(); regs && old; 
-	regs = regs->tail, old = old->tail) {
-		Temp_temp t = regs->head;
-		T_stm s = T_Move(T_Temp(t), T_Temp(old->head));
-		if (epilogue)
-			epilogue = T_Seq(epilogue, s);
-		else
-			epilogue = s;
-	}
-	return T_Seq(prologue, T_Seq(stm, epilogue));
+	if (prologue) return T_Seq(prologue, stm);
+	else return stm;
 }
 
 static Temp_tempList returnSink = NULL;
@@ -497,7 +502,7 @@ static Temp_tempList returnSink = NULL;
 AS_instrList F_procEntryExit2(AS_instrList body)
 {
 	if (!returnSink) returnSink = Temp_TempList(
-		F_RV(), Temp_TempList(F_SP(), calleeSaves()));
+		F_RV(), Temp_TempList(F_SP(), NULL));
 	return AS_splice(body, 
 	AS_InstrList(AS_Oper("", NULL, returnSink, NULL), NULL));
 }
@@ -509,12 +514,14 @@ AS_instrList F_procEntryExit2(AS_instrList body)
  */
 AS_proc F_procEntryExit3(F_frame frame, AS_instrList body)
 {
-	char pro[100];
-	sprintf(pro, "subq\t$%s, %%rsp\n", Temp_labelstring(framesizeLabel));
-	char epi[100];
-	sprintf(epi, "addq\t$%s, %%rsp\nret\n\t%s\t%ld\n",
-					Temp_labelstring(framesizeLabel), 
-					Temp_labelstring(framesizeLabel), frame->frameSize);
+	char pro[255];
+	const string prosave = "pushq\t%rbx\npushq\t%rbp\npushq\t%r12\npushq\t%r13\npushq\t%r14\npushq\t%r15\n";
+	const string epirestore = "popq\t%r15\npopq\t%r14\npopq\t%r13\npopq\t%r12\npopq\t%rbp\npopq\t%rbx\n";
+	sprintf(pro, "\t.%s=%ld\n%ssubq\t$.%s, %%rsp\n",
+	Temp_labelstring(framesizeLabel), frame->frameSize, prosave, Temp_labelstring(framesizeLabel));
+	char epi[255];
+	sprintf(epi, "addq\t$.%s, %%rsp\n%sret\n",
+					Temp_labelstring(framesizeLabel), epirestore);
 	return AS_Proc(String(pro), body, String(epi));
 }
 

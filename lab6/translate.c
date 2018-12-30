@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 #include "util.h"
 #include "table.h"
 #include "symbol.h"
@@ -149,7 +150,8 @@ Tr_level Tr_outermost(void)
 	if (outermost) {
 		return outermost;
 	}
-	return Tr_newLevel(NULL, Temp_newlabel(), NULL);
+	outermost = Tr_newLevel(NULL, Temp_namedlabel("tigermain"), NULL);
+	return outermost;
 }
 
 Tr_level Tr_newLevel(Tr_level parent, Temp_label name, U_boolList formals)
@@ -416,10 +418,28 @@ Tr_exp Tr_intExp(int d)
 	return Tr_Ex(T_Const(d));
 }
 
+string escapestr(string s)
+{
+	string ret = checked_malloc(2 * strlen(s) + 1);
+	ret[0] = '\0';
+	for (int i = 0; i < strlen(s); i++) {
+		switch(s[i]) {
+			case '\n': sprintf(ret, "%s\\n", ret); break;
+			case '\b': sprintf(ret, "%s\\b", ret); break;
+			case '\r': sprintf(ret, "%s\\r", ret); break;
+			case '\t': sprintf(ret, "%s\\t", ret); break;
+			default: sprintf(ret, "%s%c", ret, s[i]);
+		}
+	}
+	return ret;
+}
+
 Tr_exp Tr_strExp(string s)
 {
 	Temp_label sl = Temp_newlabel();
-	F_frag str = F_StringFrag(sl, s);
+	fprintf(stdout, "string: %s\n", s);
+	F_frag str = F_StringFrag(sl, escapestr(s));
+	fprintf(stdout, "escaped string: %s\n", escapestr(s));
 	return Tr_Ex(T_Name(sl));
 }
 
@@ -552,9 +572,8 @@ Tr_exp Tr_forExp(Tr_access loopvar, Tr_exp low, Tr_exp high, Tr_exp body, Temp_l
 				    T_Seq(T_Cjump(T_eq, F_Exp(loopvar->access, T_Temp(F_FP())), unEx(high), done, loop), 
 				     T_Seq(T_Label(loop), 
 					  T_Seq(
-					   T_Exp(
-						T_Binop(T_plus, 
-						 F_Exp(loopvar->access, T_Temp(F_FP())), T_Const(1))), 
+							T_Move(F_Exp(loopvar->access, T_Temp(F_FP())), 
+							T_Binop(T_plus, F_Exp(loopvar->access, T_Temp(F_FP())), T_Const(1))),
 					   T_Seq(unNx(body), 
 					    T_Seq(
 						 T_Cjump(T_lt, F_Exp(loopvar->access, T_Temp(F_FP())), unEx(high), loop, done), T_Label(done)))))))))));

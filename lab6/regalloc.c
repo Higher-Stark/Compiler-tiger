@@ -33,7 +33,7 @@ static G_nodeList spillWorklist;		// high degree
 
 static G_nodeList spilledNodes;			// nodes to be spilled
 static G_nodeList coalescedNodes;		// set of coalesced nodes
-static G_nodeList coloredNodes;			// colored nodes
+static G_nodeList coloredNodes;			// colored nodes, but not precolored
 static G_nodeList selectStack;			// nodes removed from graph
 
 static Live_moveList coalescedMoves;		// coalesced moves
@@ -48,6 +48,7 @@ static G_nodeList newTemps;		// temps come from spill
 void degree_print(G_node key, int value);
 void RA_degreeDump();
 void RA_worklistMovesDump();
+void dumpTemp2Str(Temp_temp t, string s);
 #endif
 
 bool isPrecolored(G_node n);
@@ -73,6 +74,7 @@ void SelectSpill();
 void AssignColors();
 AS_instrList RewriteProgram(AS_instrList il_old, F_frame f, G_graph g_tmp);
 Temp_map AssignRegister(G_nodeList l);
+AS_instrList dummyMove(AS_instrList il_old, Temp_map colorMap);
 
 G_nodeList N_aggregate(G_nodeList u, G_nodeList v);
 G_nodeList N_intersect(G_nodeList u, G_nodeList v);
@@ -126,13 +128,13 @@ struct RA_result RA_regAlloc(F_frame f, AS_instrList il) {
 		Build(il, &g_live);
 
 #if _DEBUG_
-		RA_degreeDump();
+		// RA_degreeDump();
 #endif
 
 		MakeWorkList(g_live.graph);
 
 #if _DEBUG_
-		RA_worklistMovesDump();
+		// RA_worklistMovesDump();
 #endif
 
 		while (simplifyWorklist != NULL || worklistMoves != NULL ||
@@ -144,8 +146,8 @@ struct RA_result RA_regAlloc(F_frame f, AS_instrList il) {
 			else if (spillWorklist) SelectSpill();
 
 #if _DEBUG_
-			RA_worklistMovesDump();
-			RA_degreeDump();
+			// RA_worklistMovesDump();
+			// RA_degreeDump();
 #endif
 
 		}	
@@ -158,7 +160,17 @@ struct RA_result RA_regAlloc(F_frame f, AS_instrList il) {
 		}
 	}
 	ret.coloring = AssignRegister(G_nodes(g_live.graph));
-	ret.il = il;
+#if _DEBUG_
+	file = fopen("__DEBUG_RA.md", "a");
+	fprintf(file, "# Temp map\n");
+	fprintf(file, "| Temp | register string |\n");
+	fprintf(file, "| :--: | :--: |\n");
+	Temp_dumpMap2(file, ret.coloring, (void (*)(void *, void *))dumpTemp2Str);
+	fprintf(file, "-------------\n");
+	fclose(file);
+#endif
+	// ret.il = il;
+	ret.il = dummyMove(il, ret.coloring);
 	return ret;
 }
 
@@ -237,6 +249,7 @@ void AddEdge(G_node u, G_node v)
 void MakeWorkList(G_graph live)
 {
 	for (G_nodeList n = G_nodes(live); n; n = n->tail) {
+		if (isPrecolored(n->head)) continue;
 		int d = (int) TAB_look(degree, n->head);
 		if (d >= K)
 			spillWorklist = N_aggregate(spillWorklist, G_NodeList(n->head, NULL));
@@ -281,11 +294,14 @@ bool MoveRelated(G_node n)
  */
 void Simplify()
 {
+	assert(!isPrecolored(simplifyWorklist->head));
+	if (isPrecolored(simplifyWorklist->head)) goto done;
 	selectStack = G_NodeList(simplifyWorklist->head, selectStack);
 	for (G_nodeList adj = Adjacent(simplifyWorklist->head); adj; adj = adj->tail)
 	{
 		DecrementDegree(adj->head);
 	}
+	done:
 	simplifyWorklist = simplifyWorklist->tail;
 }
 
@@ -297,11 +313,14 @@ void DecrementDegree(G_node m)
 {
 	int d = (int) TAB_look(degree, m);
 	TAB_enter(degree, m, (void *)(d - 1));
-	if (d == K) {
+	if (d == K && !isPrecolored(m)) {
 		EnableMoves(N_aggregate(G_NodeList(m, NULL), Adjacent(m)));
 		spillWorklist = N_remove(spillWorklist, m);
 		if (MoveRelated(m)) freezeWorklist = N_aggregate(freezeWorklist, G_NodeList(m, NULL));
-		else simplifyWorklist = N_aggregate(simplifyWorklist, G_NodeList(m, NULL));
+		else {
+			if (!isPrecolored(m))
+				simplifyWorklist = N_aggregate(simplifyWorklist, G_NodeList(m, NULL));
+		}
 	}
 }
 
@@ -384,7 +403,8 @@ void AddWorkList(G_node u)
 
 /*
  * Function: OK
- * Description: 
+ * Description: if node t is a low degree node, 
+ * 							or node t is adjacent to node r
  */
 bool OK(G_node t, G_node r)
 {
@@ -397,7 +417,7 @@ bool OK(G_node t, G_node r)
 
 /*
  * Function: Conservative
- * Description: if the node is conservative
+ * Description: if all the nodes is low degree
  */
 bool Conservative(G_nodeList nodes)
 {
@@ -486,9 +506,9 @@ void FreezeMoves(G_node u)
 		activeMoves = L_remove(activeMoves, m->src, m->dst);
 		frozenMoves = L_aggregate(frozenMoves, Live_MoveList(m->src, m->dst, NULL));
 		int d = (int) TAB_look(degree, v);
-		if (NodeMoves(v) == NULL && d < K) {
+		if (NodeMoves(v) == NULL && d < K && !isPrecolored(v)) {
 			freezeWorklist = N_remove(freezeWorklist, v);
-			simplifyWorklist = N_remove(simplifyWorklist, v);
+			simplifyWorklist = N_aggregate(simplifyWorklist, G_NodeList(v, NULL));
 		}
 	}
 }
@@ -510,6 +530,7 @@ void SelectSpill()
 		 * Nodes with highest degree and not in newTemp got first priority
 		 */
 		for (G_nodeList l = spillWorklist; l; l = l->tail) {
+			assert(!isPrecolored(l->head));
 			if (G_inNodeList(l->head, newTemps)) {
 				int dd = (int) TAB_look(degree, l->head);
 				if (dd > dtmp) {
@@ -549,6 +570,7 @@ void AssignColors()
 			okColors[i] = TRUE;
 		}
 		G_node n = selectStack->head;
+		assert(!isPrecolored(n));
 		for (G_nodeList w = G_adj(n); w; w = w->tail) {
 			G_node alias_node = GetAlias(w->head);
 			if (G_inNodeList(alias_node, coloredNodes) || isPrecolored(alias_node)) {
@@ -568,7 +590,7 @@ void AssignColors()
 		else {
 			coloredNodes = N_aggregate(coloredNodes, G_NodeList(n, NULL));
 			
-			G_enter(color, n, (void *)available + 1);
+			G_enter(color, n, (void *)(available + 1));
 		}
 		selectStack = selectStack->tail;
 	}
@@ -625,20 +647,22 @@ AS_instrList RewriteProgram(AS_instrList il_old, F_frame f, G_graph g_tmp)
 			if (read) {
 				char buf[ASSEMLEN];
 				tt = Temp_newtemp();
-				sprintf(buf, "movq\t%d + %s(%%rsp), `d0", offset, Temp_labelstring(framesizeLabel));
+				sprintf(buf, "movq\t%d + .%s(%%rsp), `d0", offset, Temp_labelstring(framesizeLabel));
 				newins = AS_Oper(String(buf), Temp_TempList(tt, NULL), NULL, NULL);
 				il_new = AS_splice(il_new, AS_InstrList(newins, NULL));
 				newins = NULL;
 			}
 
 			if (tt) {
+				assert(!isPrecolored(n->head));
 				*psrc = Temp_Replace(*psrc, G_nodeInfo(n->head), tt);
 			}
 			if (write) {
 				if (!tt) tt = Temp_newtemp();
+				assert(!isPrecolored(n->head));
 				*pdst = Temp_Replace(*pdst, G_nodeInfo(n->head), tt);
 				char buf[ASSEMLEN];
-				sprintf(buf, "movq\t`s0, %d + %s(%%rsp)", offset, Temp_labelstring(framesizeLabel));
+				sprintf(buf, "movq\t`s0, %d + .%s(%%rsp)", offset, Temp_labelstring(framesizeLabel));
 				newins = AS_Oper(String(buf), NULL, Temp_TempList(tt, NULL), NULL);
 			}
 			il_new = AS_splice(il_new, AS_InstrList(i->head, NULL));
@@ -668,6 +692,50 @@ Temp_map AssignRegister(G_nodeList l)
 		int c = (int) G_look(color, list->head);
 		string sreg = F_literal(c);
 		Temp_enter(ret, Live_gtemp(list->head), sreg);
+	}
+	return ret;
+}
+
+bool sameColor(Temp_temp t1, Temp_temp t2, Temp_map colorMap)
+{
+	string t1color = Temp_look(colorMap, t1);
+	string t2color = Temp_look(colorMap, t2);
+	return t1color == t2color;
+}
+
+int length(Temp_tempList tl)
+{
+	int cnt = 0;
+	while (tl) {
+		cnt++;
+		tl = tl->tail;
+	}
+	return cnt;
+}
+
+bool duplicate(Temp_tempList src, Temp_tempList dst, Temp_map colorMap)
+{
+	int slength = length(src);
+	int dlength = length(dst);
+	if (slength != 1 || slength != dlength) return FALSE;
+	return sameColor(src->head, dst->head, colorMap);
+}
+
+AS_instrList dummyMove(AS_instrList il_old, Temp_map colorMap)
+{
+	AS_instrList ret = NULL;
+	for (AS_instrList i = il_old; i; i = i->tail) {
+		if (i->head->kind == I_MOVE)
+		{
+			if (!duplicate(i->head->u.MOVE.src, i->head->u.MOVE.dst, colorMap))
+			{
+				ret = AS_splice(ret, AS_InstrList(i->head, NULL));
+			}
+		}
+		else
+		{
+			ret = AS_splice(ret, AS_InstrList(i->head, NULL));
+		}
 	}
 	return ret;
 }
@@ -962,5 +1030,16 @@ void RA_worklistMovesDump()
 		Live_mdump(file, worklistMoves);
 		fprintf(file, "--------------------\n");
 		fclose(file);
+}
+
+void dumpTemp2Str(Temp_temp t, string s)
+{
+	if (inTemplist(hardregisters(), t)) {
+		string hardreg = Temp_look(F_registerMap(), t);
+		fprintf(file, "| %s | %s |\n", hardreg, s);
+	}
+	else {
+		fprintf(file, "| t<%d> | %s |\n", Temp_int(t), s);
+	}
 }
 #endif

@@ -116,13 +116,13 @@ G_graph FG_AssemFlowGraph(AS_instrList il, F_frame f) {
 				last = NULL;
 			}
 			else {
-				G_addEdge(last, n);
+				if (last ) G_addEdge(last, n);
 				last = n;
 			}
 		}
 		/* Move */
 		else {
-			G_addEdge(last, n);
+			if (last) G_addEdge(last, n);
 			last = n;
 		}
 	}

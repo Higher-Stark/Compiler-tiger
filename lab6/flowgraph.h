@@ -16,6 +16,8 @@ G_graph FG_AssemFlowGraph(AS_instrList il, F_frame f);
 
 #endif
 
-#ifndef _DEBUG_
-#define _DEBUG_ 1
+#if _DEBUG_
+void dump_templist(FILE *file, Temp_tempList list);
+void printAssem(AS_instr ins);
+void FG_dump(FILE *file, G_graph graph);
 #endif

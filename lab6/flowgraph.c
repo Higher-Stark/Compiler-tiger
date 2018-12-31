@@ -17,19 +17,49 @@
 #if _DEBUG_
 FILE *file = NULL;
 
+void FG_dump(FILE *file, G_graph graph)
+{
+	fprintf(file, "## Flow Graph\n");
+	fprintf(file, "| Node index | Node class | Assembly | def | use | successor |\n");
+	fprintf(file, "| ---: | :----: | :-- | :-- | :-- | :--- |\n");
+	G_show(file, G_nodes(graph), (void (*)(void *))printAssem);
+	fprintf(file, "-------------------------\n");
+}
+
+void dump_templist(FILE *file, Temp_tempList list)
+{
+	for (Temp_tempList l = list; l; l = l->tail) {
+		if (inTemplist(hardregisters(), l->head)) {
+			string s = Temp_look(F_registerMap(), l->head);
+			fprintf(file, "%s, ", s);
+		}
+		else {
+			fprintf(file, "t<%d>, ", Temp_int(l->head));
+		}
+	}
+}
+
 void printAssem(AS_instr ins)
 {
 	switch(ins->kind) {
 		case I_LABEL: {
-			fprintf(file, " | Label - %s |", Temp_labelstring(ins->u.LABEL.label));
+			fprintf(file, " Label | %s | | |", Temp_labelstring(ins->u.LABEL.label));
 			return;
 		}
 		case I_MOVE: {
-			fprintf(file, " | MOVE - %s |", ins->u.MOVE.assem);
+			fprintf(file, " MOVE | %s | ", ins->u.MOVE.assem);
+			dump_templist(file, ins->u.MOVE.dst);
+			fprintf(file, " | ");
+			dump_templist(file, ins->u.MOVE.src);
+			fprintf(file, " |");
 			return;
 		}
 		case I_OPER: {
-			fprintf(file, " | OPER - %s |", ins->u.MOVE.assem);
+			fprintf(file, " OPER | %s |", ins->u.MOVE.assem);
+			dump_templist(file, ins->u.OPER.dst);
+			fprintf(file, " | ");
+			dump_templist(file, ins->u.OPER.src);
+			fprintf(file, " |");
 			return;
 		}
 	}
@@ -107,17 +137,18 @@ G_graph FG_AssemFlowGraph(AS_instrList il, F_frame f) {
 		/* Label */
 		if (inss->head->kind == I_LABEL) {
 			TAB_enter(labelTab, inss->head->u.LABEL.label, n);
+			if (last)
+				G_addEdge(last, n);
 			last = n;
 		}
 		/* jump and non-jump */
 		else if (inss->head->kind == I_OPER) {
+			if (last)
+				G_addEdge(last, n);
+			last = n;
 			if (inss->head->u.OPER.jumps) {
 				queue = push(queue, n);
 				last = NULL;
-			}
-			else {
-				if (last ) G_addEdge(last, n);
-				last = n;
 			}
 		}
 		/* Move */
@@ -140,11 +171,7 @@ G_graph FG_AssemFlowGraph(AS_instrList il, F_frame f) {
 
 #if _DEBUG_
 	file = fopen("__DEBUG_.md", "a");
-	fprintf(file, "# Flow Graph\n");
-	fprintf(file, "| Node index | successor | Node Info |\n");
-	fprintf(file, "| ---: | :--- | :---- |\n");
-	G_show(file, G_nodes(graph), (void (*)(void *))printAssem);
-	fprintf(file, "-------------------------\n");
+	FG_dump(file, graph);
 	fclose(file);
 #endif
 	return graph;

@@ -18,7 +18,11 @@
  */
 void dump_map(G_node key, Temp_tempList *value)
 {
-	fprintf(file, "| %d | %p |\n", G_Key(key), *value);
+	fprintf(file, "| %d | ", G_Key(key));
+	printAssem(G_nodeInfo(key));
+	// fprintf(file, " | ");
+	dump_templist(file, *value);
+	fprintf(file, " |\n");
 }
 #endif
 
@@ -179,13 +183,9 @@ struct Live_graph Live_liveness(G_graph flow) {
 	lg.graph = G_Graph();
 	G_nodeList flowNodes = G_nodes(flow);
 #if _DEBUG_
-	file = fopen("__DEBUG_.md", "a");
-	// fprintf(file, "# liveness\n");
-	fprintf(file, "## 0\n");
-	fprintf(file, "| Node index | successor | Node info |\n");
-	fprintf(file, "| ---: | :--- | :--- |\n");
-	G_show(file, flowNodes, (void (*)(void *))printAssem);
-	fprintf(file, "-------------------\n");
+	file = fopen("__DEBUG_liveness.md", "a");
+	fprintf(file, "# liveness - line 185\n");
+	FG_dump(file, flow);
 	fclose(file);
 #endif
 	// in[instruction<n>]
@@ -206,16 +206,6 @@ struct Live_graph Live_liveness(G_graph flow) {
 			}
 		}
 	}
-#if _DEBUG_
-	file = fopen("__DEBUG_.md", "a");
-	fprintf(file, "# liveness\n");
-	fprintf(file, "## 1\n");
-	fprintf(file, "| Node index | successor | Node info |\n");
-	fprintf(file, "| ---: | :--- | :--- |\n");
-	G_show(file, flowNodes, (void (*)(void *))printAssem);
-	fprintf(file, "-------------------\n");
-	fclose(file);
-#endif
 	G_nodeList stack = NULL;
 	{
 
@@ -235,6 +225,7 @@ struct Live_graph Live_liveness(G_graph flow) {
 			Temp_tempList srcs = FG_use(flows->head);
 			for (Temp_tempList tl = srcs; tl; tl = tl->tail) {
 				if (!TAB_look(tmpTab, tl->head)) {
+					assert(tl->head);
 					G_node gn = G_Node(lg.graph, tl->head);
 					TAB_enter(tmpTab, tl->head, gn);
 				}
@@ -242,6 +233,7 @@ struct Live_graph Live_liveness(G_graph flow) {
 			Temp_tempList dsts = FG_def(flows->head);
 			for (Temp_tempList tl = dsts; tl; tl = tl->tail) {
 				if (!TAB_look(tmpTab, tl->head)) {
+					assert(tl->head);
 					G_node gn = G_Node(lg.graph, tl->head);
 					TAB_enter(tmpTab, tl->head, gn);
 				}
@@ -249,40 +241,19 @@ struct Live_graph Live_liveness(G_graph flow) {
 		}
 
 	}
-#if _DEBUG_
-	file = fopen("__DEBUG_.md", "a");
-	// fprintf(file, "# liveness\n");
-	fprintf(file, "## 2\n");
-	fprintf(file, "| Node index | successor | Node info |\n");
-	fprintf(file, "| ---: | :--- | :--- |\n");
-	G_show(file, flowNodes, (void (*)(void *))printAssem);
-	fprintf(file, "-------------------\n");
-	fclose(file);
-#endif
 
 #if _DEBUG_
 	int debug_cycle = 0;
-	file = fopen("__DEBUG_G_.md", "a");
+	file = fopen("__DEBUG_liveness.md", "a");
 	fprintf(file, "# Graph Table\n");
-	fclose(file);
+	fprintf(file, "## Cycle %4d\n", debug_cycle++);
+	Live_livedump(file, inTab);
 #endif
 
 	// liveness analysis
 	bool update = TRUE;
 	while (update) {
 		update = FALSE;
-
-#if _DEBUG_
-		file = fopen("__DEBUG_G_.md", "a");
-		fprintf(file, "## Cycle %4d\n", debug_cycle);
-		fprintf(file, "| Key | value |\n");
-		fprintf(file, "| :--: | :--: |\n");
-		TAB_dump(inTab, (void (*)(void *, void *))dump_map); // TODO:
-		fprintf(file, "-------------\n");
-		fclose(file);
-		debug_cycle++;
-#endif
-
 		for (G_nodeList cursor = stack; cursor; cursor = cursor->tail)
 		{
 			G_node cur = cursor->head;
@@ -310,6 +281,12 @@ struct Live_graph Live_liveness(G_graph flow) {
 			*(Temp_tempList *) G_look(inTab, cur) = nintemps;
 			*(Temp_tempList *) G_look(outTab, cur) = noutemps;
 		}
+
+#if _DEBUG_
+		fprintf(file, "## Cycle %4d\n", debug_cycle++);
+		Live_livedump(file, inTab);
+#endif
+
 	}
 	//conflict graph 
 	Live_moveList mvlist = NULL;
@@ -330,8 +307,12 @@ struct Live_graph Live_liveness(G_graph flow) {
 				// conflict between dest temps
 				for (Temp_tempList ccdst = cdst->tail; ccdst; ccdst = ccdst->tail) {
 					G_node ndst_node = TAB_look(tmpTab, ccdst->head);
-					if (ndst_node != dst_node && !G_inNodeList(ndst_node, G_adj(dst_node)))
+					if (ndst_node != dst_node && !G_inNodeList(ndst_node, G_adj(dst_node))) {
 						G_addEdge(dst_node, ndst_node);
+#if _DEBUG_
+						fprintf(file, "* Add edge between t<%d> and t<%d>\n", Temp_int(cdst->head), Temp_int(ccdst->head));
+#endif
+					}
 				}
 
 				// do not add conflict between src and dst
@@ -346,8 +327,12 @@ struct Live_graph Live_liveness(G_graph flow) {
 				for (Temp_tempList ot = outmps; ot; ot = ot->tail) {
 					if (!inTemplist(srcs, ot->head)) {
 						G_node otnode = TAB_look(tmpTab, ot->head);
-						if (!G_inNodeList(otnode, G_adj(dst_node)))
+						if (dst_node != otnode && !G_inNodeList(otnode, G_adj(dst_node))) {
 							G_addEdge(otnode, dst_node);
+#if _DEBUG_
+							fprintf(file, "* Add edge between t<%d> and t<%d>\n", Temp_int(cdst->head), Temp_int(ot->head));
+#endif
+						}
 					}
 				}
 
@@ -365,18 +350,57 @@ struct Live_graph Live_liveness(G_graph flow) {
 
 				for (Temp_tempList itt = uList->tail; itt; itt = itt -> tail) {
 					G_node ittnode = TAB_look(tmpTab, itt->head);
-					if (itnode != ittnode && !G_inNodeList(ittnode, G_adj(itnode)))
+					if (itnode != ittnode && !G_inNodeList(ittnode, G_adj(itnode))) {
 						G_addEdge(itnode, ittnode);
+#if _DEBUG_
+							fprintf(file, "* Add edge between t<%d> and t<%d>\n", Temp_int(it->head), Temp_int(itt->head));
+#endif
+					}
 				}
 
 			}
 		}
 	}
 	lg.moves = mvlist;
+
+#if _DEBUG_
+	fprintf(file, "# Conflict map\n");
+	fprintf(file, "| Node index | node info | successor |\n");
+	fprintf(file, "| --: | :--: | :-- |\n");
+	G_show(file, G_nodes(lg.graph), (void (*)(void *))conflict_dump);
+	fprintf(file, "-----------\n");
+
+	fprintf(file, "# Move List \n");
+	fprintf(file, "| From | To |\n");
+	fprintf(file, "| :--: | :--: |\n");
+	Live_mdump(file, mvlist);
+	fprintf(file, "---------------\n");
+	fclose(file);
+#endif
+
 	return lg;
 }
 
 #if _DEBUG_
+void conflict_dump(Temp_temp t)
+{
+	string s = Temp_look(F_registerMap(), t);
+	if (s) {
+		fprintf(file, " %s | ", s);
+	}
+	else {
+		fprintf(file, " t<%d> | ", Temp_int(t));
+	}
+}
+
+void Live_livedump(FILE *file, G_table table)
+{
+	fprintf(file, "| Key | class | assembly | def | use | in live |\n");
+	fprintf(file, "| :--: | :--: | :-- | :--: | :--: | :--:|\n");
+	TAB_dump(table, (void (*)(void *, void *))dump_map); // TODO:
+	fprintf(file, "-------------\n");
+}
+
 void Live_mdump(FILE *out, Live_moveList mvList)
 {
 	for (Live_moveList cur = mvList; cur; cur = cur->tail) {

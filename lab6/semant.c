@@ -266,16 +266,16 @@ struct expty transExp(S_table venv, S_table tenv, A_exp a, Tr_level l ,Temp_labe
 			struct expty hity = transExp(venv, tenv, a->u.forr.hi, l, label);
 			if (actual_ty(hity.ty) != Ty_Int()) EM_error(a->u.forr.hi->pos, "for exp's range type is not integer");
 			S_beginScope(venv);
-			Tr_access loopvar = Tr_allocLocal(l, TRUE);
-			Tr_access looplabel = Tr_allocLocal(l, TRUE);
+			Tr_access loopvar = Tr_allocLocal(l, a->u.forr.escape);
+			// Tr_access looplabel = Tr_allocLocal(l, TRUE);
 			Temp_label done = Temp_newlabel();
 			S_enter(venv, a->u.forr.var, E_ROVarEntry(loopvar, Ty_Int()));
 			// S_enter(venv, protect(a->u.forr.var), E_ROVarEntry(loopvar, Ty_Int()));
-			S_enter(venv, S_Symbol("<loop>"), E_ROVarEntry(looplabel, Ty_Void()));
+			// S_enter(venv, S_Symbol("<loop>"), E_ROVarEntry(looplabel, Ty_Void()));
 			struct expty bodyty = transExp(venv, tenv, a->u.forr.body, l, done);
 			if (actual_ty(bodyty.ty) != Ty_Void()) EM_error(a->u.forr.body->pos, "for body must produce no value");
 			S_endScope(venv);
-			return expTy(Tr_forExp(loopvar, loty.exp, hity.exp, bodyty.exp, done), Ty_Void());
+			return expTy(Tr_forExp(loopvar, loty.exp, hity.exp, bodyty.exp, done, l), Ty_Void());
 		}
 		case A_callExp: {
 			E_enventry x = S_look(venv, a->u.call.func);

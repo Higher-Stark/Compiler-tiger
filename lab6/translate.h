@@ -82,7 +82,7 @@ Tr_exp Tr_arrayAlloc(Tr_exp n, Tr_exp init);
 
 Tr_exp Tr_whileExp(Tr_exp test, Tr_exp body, Temp_label done);
 
-Tr_exp Tr_forExp(Tr_access loopvar, Tr_exp low, Tr_exp high, Tr_exp body, Temp_label done);
+Tr_exp Tr_forExp(Tr_access loopvar, Tr_exp low, Tr_exp high, Tr_exp body, Temp_label done, Tr_level level);
 
 Tr_exp Tr_breakExp(Temp_label done);
 

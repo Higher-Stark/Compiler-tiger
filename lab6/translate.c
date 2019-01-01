@@ -313,8 +313,7 @@ Tr_exp Tr_fieldVar(Tr_exp ex, const int fieldIdx)
 {
 	return Tr_Ex(
 			T_Mem(
-			 T_Binop(T_plus, unEx(ex), T_Binop(
-			  T_mul, T_Const(fieldIdx), T_Const(F_wordSize)))));
+			 T_Binop(T_plus, unEx(ex), T_Const(fieldIdx * F_wordSize))));
 }
 
 Tr_exp Tr_subscriptVar(Tr_exp ex, Tr_exp offset)
@@ -453,7 +452,7 @@ string escapestr(string s)
 Tr_exp Tr_strExp(string s)
 {
 	Temp_label sl = Temp_newlabel();
-	F_frag str = F_StringFrag(sl, escapestr(s));
+	F_frag str = F_StringFrag(sl, s);
 	return Tr_Ex(T_Name(sl));
 }
 
@@ -483,15 +482,17 @@ Tr_exp Tr_ifExp(Tr_exp testt, Tr_exp thenn, Tr_exp elsee)
 		}
 		else {												// valued if-then-else
 			Temp_temp r = Temp_newtemp();
-			T_stm s2 = T_Seq(unCx(testt).stm, 
-						T_Seq(T_Label(t), 
-						 T_Seq(T_Move(T_Temp(r), unEx(thenn)), 
-						  T_Seq(T_Jump(T_Name(joint), Temp_LabelList(joint, NULL)), 
-						   T_Seq(T_Label(f), 
-						    T_Seq(
-							 T_Move(T_Temp(r), unEx(elsee)), 
-							 T_Label(joint)))))));
-			return Tr_Ex(T_Eseq(s2, T_Temp(r)));
+			T_exp s2 = T_Eseq(unCx(testt).stm, 
+						T_Eseq(
+							T_Label(t), 
+						 T_Eseq(T_Move(T_Temp(r), unEx(thenn)), 
+						  T_Eseq(T_Jump(T_Name(joint), Temp_LabelList(joint, NULL)), 
+						   T_Eseq(
+								 T_Label(f), 
+						    T_Eseq(T_Move(T_Temp(r), unEx(elsee)),
+							 	 T_Eseq( 
+							 		T_Label(joint), T_Temp(r))))))));
+			return Tr_Ex(s2);
 		}
 	}
 	else {                  // else statment doesn't exists
@@ -513,14 +514,12 @@ Tr_exp Tr_recordAlloc(int cnt, Tr_fieldList fields)
 	Tr_fieldList f = fields;
 	T_stm alloc = T_Move(T_Temp(r), 
 	 F_externalCall("malloc", 
-	  T_ExpList(
-	   T_Binop(T_mul, T_Const(cnt), T_Const(F_wordSize)), NULL)));
+	  T_ExpList( T_Const(cnt * F_wordSize), NULL)));
 	T_stm movs = NULL;
 	while (f) {
 		T_stm mov = T_Move(
 					 T_Mem(T_Binop(T_plus, T_Temp(r), 
-					  T_Binop(T_mul, T_Const(f->head->order), 
-					   T_Const(F_wordSize)))), unEx(f->head->exp));
+					  T_Const(f->head->order * F_wordSize))), unEx(f->head->exp));
 		if (!movs) movs = mov;
 		else movs = T_Seq(mov, movs);
 		f = f->tail;
@@ -572,26 +571,31 @@ Tr_exp Tr_whileExp(Tr_exp test, Tr_exp body, Temp_label done)
  * @body: body of for loop
  * @done: end of the for loop
  */
-Tr_exp Tr_forExp(Tr_access loopvar, Tr_exp low, Tr_exp high, Tr_exp body, Temp_label done)
+Tr_exp Tr_forExp(Tr_access loopvar, Tr_exp low, Tr_exp high, Tr_exp body, Temp_label done, Tr_level level)
 {
 	Temp_label loop = Temp_newlabel();
-	Temp_label z = Temp_newlabel();
-	Temp_label zz = Temp_newlabel();
-	T_stm s1 = T_Cjump(T_le, unEx(low), unEx(high), z, done);
-	T_stm s2 = T_Seq(T_Label(z),  
-				T_Seq(T_Move(F_Exp(loopvar->access, T_Temp(F_FP())), unEx(low)), 
-				 T_Seq(T_Cjump(T_gt, F_Exp(loopvar->access, T_Temp(F_FP())), unEx(high), done, zz), 
-				  T_Seq(T_Label(zz), 
-				   T_Seq(unNx(body), 
-				    T_Seq(T_Cjump(T_eq, F_Exp(loopvar->access, T_Temp(F_FP())), unEx(high), done, loop), 
-				     T_Seq(T_Label(loop), 
-					  T_Seq(
-							T_Move(F_Exp(loopvar->access, T_Temp(F_FP())), 
-							T_Binop(T_plus, F_Exp(loopvar->access, T_Temp(F_FP())), T_Const(1))),
-					   T_Seq(unNx(body), 
-					    T_Seq(
-						 T_Cjump(T_lt, F_Exp(loopvar->access, T_Temp(F_FP())), unEx(high), loop, done), T_Label(done)))))))))));
-	return Tr_Nx(T_Seq(s1, s2));
+	Temp_label begin = Temp_newlabel();
+	Temp_label bodyy = Temp_newlabel();
+	Temp_label increase = Temp_newlabel();
+	T_stm head = T_Cjump(T_gt, unEx(low), unEx(high), done, begin);
+	Tr_exp v = Tr_simpleVar(loopvar, level);
+	T_stm init = T_Move(unEx(v), unEx(low));
+	T_stm update = T_Move(unEx(v), T_Binop(T_plus, unEx(v), T_Const(1)));
+	T_stm test = T_Cjump(T_ne, unEx(v), unEx(high), increase, done);
+	T_stm all = T_Seq(head, 
+	T_Seq(
+		T_Label(begin), 
+	T_Seq(init, 
+	T_Seq(T_Jump(T_Name(loop), Temp_LabelList(loop, NULL)), 
+	T_Seq(
+		T_Label(increase), 
+	T_Seq(update, 
+	T_Seq(
+		T_Label(loop), 
+	T_Seq(unNx(body), 
+	T_Seq(test, 
+	 T_Label(done))))))))));
+	return Tr_Nx(all);
 }
 
 /*

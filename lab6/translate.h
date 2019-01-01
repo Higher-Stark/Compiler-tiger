@@ -70,6 +70,8 @@ Tr_exp Tr_nilExp();
 
 Tr_exp Tr_intExp(int d);
 
+string escapestr(string s);
+
 Tr_exp Tr_strExp(string s);
 
 Tr_exp Tr_ifExp(Tr_exp testt, Tr_exp thenn, Tr_exp elsee);

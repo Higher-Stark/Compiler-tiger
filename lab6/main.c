@@ -120,7 +120,7 @@ void doStr(FILE *out, Temp_label label, string str) {
 	fprintf(out, "\"\n");
   */
   fprintf(out, ".long\t%ld\n", strlen(str));
-	fprintf(out, ".string \"%s\"\n", str);
+	fprintf(out, ".string \"%s\"\n", escapestr(str));
   fprintf(out, ".align\t%d\n", F_wordSize);
 
 }

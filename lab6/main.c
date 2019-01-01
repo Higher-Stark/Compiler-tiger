@@ -3,6 +3,7 @@
  */
 
 #include <stdio.h>
+#include <string.h>
 #include "util.h"
 #include "symbol.h"
 #include "types.h"
@@ -51,8 +52,8 @@ static void doProc(FILE *out, F_frame frame, T_stm body)
  F_tempMap = Temp_layerMap(F_tempMap, F_registerMap());
 
  printf("doProc for function %s:\n", S_name(F_name(frame)));
- // printStmList(stdout, T_StmList(body, NULL));
- // printf("-------====IR tree=====-----\n");
+ printStmList(stdout, T_StmList(body, NULL));
+ printf("-------====IR tree=====-----\n");
 
  stmList = C_linearize(body);
  // printStmList(stdout, stmList);
@@ -67,8 +68,8 @@ static void doProc(FILE *out, F_frame frame, T_stm body)
  }*/
 
  stmList = C_traceSchedule(blo);
- // printStmList(stdout, stmList);
- // printf("-------====trace=====-----\n");
+ printStmList(stdout, stmList);
+ printf("-------====trace=====-----\n");
  iList  = F_codegen(frame, stmList); /* 9 */
 
  AS_printInstrList(stdout, iList, Temp_layerMap(F_tempMap, Temp_name()));
@@ -118,7 +119,9 @@ void doStr(FILE *out, Temp_label label, string str) {
 	}
 	fprintf(out, "\"\n");
   */
+  fprintf(out, ".long\t%ld\n", strlen(str));
 	fprintf(out, ".string \"%s\"\n", str);
+  fprintf(out, ".align\t%d\n", F_wordSize);
 
 }
 

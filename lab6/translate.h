@@ -34,6 +34,10 @@ typedef struct Tr_fieldList_ *Tr_fieldList;
 
 Tr_expList Tr_ExpList(Tr_exp head, Tr_expList tail);
 
+Tr_expList Tr_splice(Tr_expList head, Tr_expList tail);
+
+Tr_expList Tr_append(Tr_expList head, Tr_exp e);
+
 Tr_field Tr_Field(int order, Tr_exp exp);
 
 Tr_fieldList Tr_FieldList(Tr_field head, Tr_fieldList tail);

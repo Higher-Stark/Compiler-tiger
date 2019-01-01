@@ -63,7 +63,7 @@ Temp_tempList calleeSaves();
 
 Temp_tempList F_argregs();
 
-T_stm F_procEntryExit1(F_frame frame, T_stm stm);
+T_stm F_procEntryExit1(F_frame frame, T_exp body);
 
 AS_instrList F_procEntryExit2(AS_instrList body);
 

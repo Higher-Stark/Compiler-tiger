@@ -294,7 +294,8 @@ struct expty transExp(S_table venv, S_table tenv, A_exp a, Tr_level l ,Temp_labe
 						EM_error(arg->head->pos, "para type mismatch");
 						break;  // should I continue checking the rest?
 					}
-					el = Tr_ExpList(ty.exp, el);
+					// Fixed params order
+					el = Tr_append(el, ty.exp);
 					// ** Leaving allocate space of function arguments to prologue
 					// Tr_access acc1 = Tr_allocLocal(l, TRUE);
 					// al = Tr_AccessList(acc1, al);

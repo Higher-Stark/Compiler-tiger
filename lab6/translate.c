@@ -105,6 +105,22 @@ Tr_expList Tr_ExpList(Tr_exp head, Tr_expList tail)
 	return el;
 }
 
+Tr_expList Tr_splice(Tr_expList head, Tr_expList tail)
+{
+	Tr_expList htail = head;
+	while (htail && htail->tail) {
+		htail = htail->tail;
+	}
+	if (!htail) return tail;
+	htail->tail = tail;
+	return head;
+}
+
+Tr_expList Tr_append(Tr_expList head, Tr_exp e)
+{
+	return Tr_splice(head, Tr_ExpList(e, NULL));
+}
+
 static patchList PatchList(Temp_label *head, patchList tail)
 {
 	patchList list;
@@ -437,9 +453,7 @@ string escapestr(string s)
 Tr_exp Tr_strExp(string s)
 {
 	Temp_label sl = Temp_newlabel();
-	fprintf(stdout, "string: %s\n", s);
 	F_frag str = F_StringFrag(sl, escapestr(s));
-	fprintf(stdout, "escaped string: %s\n", escapestr(s));
 	return Tr_Ex(T_Name(sl));
 }
 
@@ -703,7 +717,7 @@ Tr_exp Tr_varDec(Tr_access acc, Tr_exp init)
  */
 int Tr_funcDec(Tr_level l, Tr_exp body)
 {
-	T_stm bd = F_procEntryExit1(l->frame, unNx(body));
+	T_stm bd = F_procEntryExit1(l->frame, unEx(body));
 	F_frag f = F_ProcFrag(bd, l->frame);
 	return 0;
 }

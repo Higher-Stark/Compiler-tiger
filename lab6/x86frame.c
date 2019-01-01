@@ -347,15 +347,20 @@ F_frame F_newFrame(Temp_label name, U_boolList formals)
 {
 	F_frame ret = (F_frame) checked_malloc(sizeof (struct F_frame_));
 	ret->name = name;
-	ret->locals = F_newAccessList(F_inFrame(-F_wordSize), 
-								F_newAccessList(F_inFrame(-F_wordSize * 2), NULL));
 	// simply assume there will be a function call
 	// in function body, one word size for static link
 	// another word size for return address
-	ret->frameSize = F_wordSize * (2 + 2);
 	// for static link
+	ret->frameSize = F_wordSize * 2;
 	ret->outCnt = 1;
 	ret->formalEscapeList = formals;
+	// TODO: modify procEntryExit1 to meet arg location
+	for (Temp_tempList tl = callerSaves(); tl; tl = tl->tail) {
+		F_allocLocal(ret, TRUE);
+	}
+	for (Temp_tempList tl = F_argregs(); tl; tl = tl->tail ) {
+		F_allocLocal(ret, TRUE);
+	}
 	U_boolList cursor = formals;
 	F_accessList list = NULL;
 	F_accessList tail = list;
@@ -467,20 +472,18 @@ int F_inFrameOffset(F_access acc)
 }
 
 T_exp F_externalCall(string s, T_expList args) {
-	return T_Call(T_Name(Temp_namedlabel(s)), args);
+	return T_Call(T_Name(Temp_namedlabel(s)), T_ExpList(T_Temp(F_FP()), args));
 }
 
-T_stm F_procEntryExit1(F_frame frame, T_stm stm)
+T_stm F_procEntryExit1(F_frame frame, T_exp body)
 {
 	// Save callee-saved registers
 	T_stm prologue = NULL;
 	// Move escaped parameters in first 6 parameters to stack
 	int idx = 1;
 	Temp_tempList mregs = F_argregs();
-	U_boolList bl = frame->formalEscapeList;
-	bl = bl->tail;
-	int cnt = 3;
-	for (U_boolList bl = frame->formalEscapeList; bl; bl = bl->tail) {
+	int cnt = 9;
+	for (U_boolList bl = frame->formalEscapeList->tail; bl; bl = bl->tail) {
 		if (bl->head && idx < 6) {
 			T_stm s = T_Move(
 				T_Mem(
@@ -493,8 +496,9 @@ T_stm F_procEntryExit1(F_frame frame, T_stm stm)
 		idx++;
 	}
 
-	if (prologue) return T_Seq(prologue, stm);
-	else return stm;
+	T_stm ss = T_Move(T_Temp(F_RV()), body);
+	if (prologue) return T_Seq(prologue, ss);
+	else return ss;
 }
 
 static Temp_tempList returnSink = NULL;

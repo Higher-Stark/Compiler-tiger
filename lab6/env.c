@@ -99,6 +99,9 @@ S_table E_base_venv(void)
 	formals->tail = NULL;
 	S_enter(venv, S_Symbol("printi"), E_FunEntry(level, Temp_namedlabel("printi"), formals, Ty_Void()));
 
+	formals = checked_malloc(sizeof(*formals));
+	formals->head = Ty_String();
+	formals->tail = NULL;
 	result = Ty_Int();
 	S_enter(venv,S_Symbol("ord"),E_FunEntry(level,Temp_namedlabel("ord"),formals,result));
 

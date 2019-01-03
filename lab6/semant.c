@@ -132,7 +132,7 @@ struct expty transExp(S_table venv, S_table tenv, A_exp a, Tr_level l ,Temp_labe
 				if (left_rootty->kind != right_rootty->kind) EM_error(get_opexp_rightpos(a), "same type required");
 				Tr_exp e;
 				if (left_rootty->kind != Ty_string) e = Tr_opExp(oper, left.exp, right.exp);
-				else e = Tr_strcmpExp(oper, left.exp, right.exp);
+				else e = Tr_strcmpExp(oper, left.exp, right.exp, l);
 				return expTy(e, Ty_Int());
 			}
 			// compare
@@ -142,7 +142,7 @@ struct expty transExp(S_table venv, S_table tenv, A_exp a, Tr_level l ,Temp_labe
 						case Ty_int: case Ty_record: case Ty_array: case Ty_nil:
 							return expTy(Tr_opExp(oper, left.exp, right.exp), Ty_Int());
 						case Ty_string: 
-							return expTy(Tr_strcmpExp(oper, left.exp, right.exp), Ty_Int());
+							return expTy(Tr_strcmpExp(oper, left.exp, right.exp, l), Ty_Int());
 						default: EM_error(get_opexp_leftpos(a), "expression doesn't support equal comparing");
 					}
 				}

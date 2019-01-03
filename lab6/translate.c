@@ -380,8 +380,9 @@ Tr_exp Tr_opExp(A_oper oper, Tr_exp left, Tr_exp right)
 	assert(0);
 }
 
-Tr_exp Tr_strcmpExp(A_oper oper, Tr_exp left, Tr_exp right)
+Tr_exp Tr_strcmpExp(A_oper oper, Tr_exp left, Tr_exp right, Tr_level l)
 {
+	Tr_exp compare = Tr_callExp(l, Tr_outermost(), Temp_namedlabel("stringEqual"), Tr_ExpList(left, Tr_ExpList(right, NULL)));
 	T_exp res = F_externalCall("strcmp", T_ExpList(unEx(left), T_ExpList(unEx(right), NULL)));
 	switch(oper) {
 		case A_ltOp: {
@@ -409,13 +410,13 @@ Tr_exp Tr_strcmpExp(A_oper oper, Tr_exp left, Tr_exp right)
 			return Tr_Cx(trues, falses, s);
 		}
 		case A_eqOp: {
-			T_stm s = T_Cjump(T_eq, res, T_Const(0), NULL, NULL);
+			T_stm s = T_Cjump(T_eq, unEx(compare), T_Const(1), NULL, NULL);
 			patchList trues = PatchList(&s->u.CJUMP.true, NULL);
 			patchList falses = PatchList(&s->u.CJUMP.false, NULL);
 			return Tr_Cx(trues, falses, s);
 		}
 		case A_neqOp: {
-			T_stm s = T_Cjump(T_ne, res, T_Const(0), NULL, NULL);
+			T_stm s = T_Cjump(T_ne, unEx(compare), T_Const(0), NULL, NULL);
 			patchList trues = PatchList(&s->u.CJUMP.true, NULL);
 			patchList falses = PatchList(&s->u.CJUMP.false, NULL);
 			return Tr_Cx(trues, falses, s);

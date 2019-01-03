@@ -64,7 +64,7 @@ Tr_exp Tr_subscriptVar(Tr_exp ex, Tr_exp offset);
 
 Tr_exp Tr_opExp(A_oper oper, Tr_exp left, Tr_exp right);
 
-Tr_exp Tr_strcmpExp(A_oper oper, Tr_exp left, Tr_exp right);
+Tr_exp Tr_strcmpExp(A_oper oper, Tr_exp left, Tr_exp right, Tr_level l);
 
 Tr_exp Tr_nilExp();
 

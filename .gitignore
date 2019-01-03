@@ -115,6 +115,10 @@ y.output
 y.tab.c
 y.tab.h
 *.code-workspace
+*.tig.s
+tmp
+__DEBUG_*
+tiger-compiler
 
 # End of https://www.gitignore.io/api/c,visualstudiocode,windows,linux
 

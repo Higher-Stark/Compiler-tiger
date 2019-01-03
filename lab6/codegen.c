@@ -349,7 +349,7 @@ void C_Move(T_stm s)
     }
   } 
   // Move binary calculation -> Temp
-  if (src->kind == T_BINOP && dst->kind == T_TEMP) {
+  if (src->kind == T_BINOP && dst->kind == T_TEMP && src->u.BINOP.op == T_plus) {
     T_exp left = NULL, right = NULL;
     rerange(src->u.BINOP.op, src->u.BINOP.left, src->u.BINOP.right, &left, &right);
     if (!left) {

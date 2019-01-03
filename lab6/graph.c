@@ -102,12 +102,12 @@ void G_show(FILE *out, G_nodeList p, void showInfo(void *)) {
     G_node n = p->head;
     G_nodeList q;
     assert(n);
+    fprintf(out, "| %d | ", n->mykey); 
     if (showInfo) 
       showInfo(n->info);
-    fprintf(out, " (%d): ", n->mykey); 
     for(q=G_succ(n); q!=NULL; q=q->tail) 
            fprintf(out, "%d ", q->head->mykey);
-    fprintf(out, "\n");
+    fprintf(out, "|\n");
   }
 }
 
@@ -167,4 +167,9 @@ void *G_look(G_table t, G_node node)
   return TAB_look(t, node);
 }
 
-
+#if _DEBUG_
+int G_Key (G_node n)
+{
+  return n->mykey;
+}
+#endif

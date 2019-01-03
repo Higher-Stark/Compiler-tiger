@@ -38,3 +38,11 @@ void Temp_dumpMap(FILE *out, Temp_map m);
 Temp_map Temp_name(void);
 
 #endif
+
+#ifndef _DEBUG_
+#define _DEBUG_ 1
+#endif
+
+#if _DEBUG_
+void Temp_dumpMap2(FILE *out, Temp_map m, void (*show)(void *key, void *value));
+#endif

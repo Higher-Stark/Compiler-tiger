@@ -174,3 +174,14 @@ void Temp_dumpMap(FILE *out, Temp_map m) {
      Temp_dumpMap(out,m->under);
   }
 }
+
+#if _DEBUG_
+void Temp_dumpMap2(FILE *out, Temp_map m, void (*show)(void *key, void *value))
+{
+  TAB_dump(m->tab, show);
+  // if (m->under) {
+  //   fprintf(out, "-------------\n");
+  //   Temp_dumpMap2(out, m->under, show);
+  // }
+}
+#endif

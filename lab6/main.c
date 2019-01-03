@@ -56,16 +56,15 @@ static void doProc(FILE *out, F_frame frame, T_stm body)
  printf("-------====IR tree=====-----\n");
 
  stmList = C_linearize(body);
- // printStmList(stdout, stmList);
- // printf("-------====Linearlized=====-----\n");
+ printStmList(stdout, stmList);
+ printf("-------====Linearlized=====-----\n");
 
  blo = C_basicBlocks(stmList);
  C_stmListList stmLists = blo.stmLists;
- /*
  for (; stmLists; stmLists = stmLists->tail) {
  	printStmList(stdout, stmLists->head);
 	printf("------====Basic block=====-------\n");
- }*/
+ }
 
  stmList = C_traceSchedule(blo);
  printStmList(stdout, stmList);

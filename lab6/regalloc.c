@@ -45,10 +45,22 @@ static Live_moveList activeMoves;				// not ready to combine moves
 static G_nodeList newTemps;		// temps come from spill
 
 #if _DEBUG_
+
+#define ADD 1
+#define REMOVE 0
+
+void alias_dump(G_node n, G_node ali);
 void degree_print(G_node key, int value);
 void RA_degreeDump();
-void RA_worklistMovesDump();
+void RA_MoveListDump(FILE *file, string header, Live_moveList moves);
+void dumpNodeList(FILE *out, string header, G_nodeList nodes);
 void dumpTemp2Str(Temp_temp t, string s);
+void dump_moveListTab(FILE *out, G_table tmp_mvs);
+void printTemp(FILE * file, Temp_temp t);
+void printTempMoves(G_node n, Live_moveList moves);
+void showChange(FILE *out, string header, G_nodeList nodes, G_node n, int add);
+void showChange2(FILE *out, string header, Live_moveList moves, G_node src, G_node dst, int add);
+
 #endif
 
 bool isPrecolored(G_node n);
@@ -64,7 +76,7 @@ void DecrementDegree(G_node m);
 void EnableMoves(G_nodeList nodes);
 void Coalesce();
 void AddWorkList(G_node u);
-bool OK(G_node t, G_node r);
+bool OK(G_nodeList nodes, G_node r);
 bool Conservative(G_nodeList nodes);
 G_node GetAlias(G_node n);
 void Combine(G_node u, G_node v);
@@ -95,6 +107,12 @@ struct RA_result RA_regAlloc(F_frame f, AS_instrList il) {
 	bool complete = FALSE;
 	struct RA_result ret;
 	struct Live_graph g_live;
+
+#if _DEBUG_
+	file = fopen("__DEBUG_RA.md", "a");
+	fprintf(file, "# Register allocation\n");
+	fclose(file);
+#endif
 
 	while (!complete) {
 		complete = TRUE;
@@ -128,14 +146,10 @@ struct RA_result RA_regAlloc(F_frame f, AS_instrList il) {
 		Build(il, &g_live);
 
 #if _DEBUG_
-		// RA_degreeDump();
+		RA_degreeDump();
 #endif
 
 		MakeWorkList(g_live.graph);
-
-#if _DEBUG_
-		// RA_worklistMovesDump();
-#endif
 
 		while (simplifyWorklist != NULL || worklistMoves != NULL ||
 					 freezeWorklist != NULL || spillWorklist != NULL)
@@ -144,12 +158,6 @@ struct RA_result RA_regAlloc(F_frame f, AS_instrList il) {
 			else if (worklistMoves) Coalesce();
 			else if (freezeWorklist) Freeze();
 			else if (spillWorklist) SelectSpill();
-
-#if _DEBUG_
-			// RA_worklistMovesDump();
-			// RA_degreeDump();
-#endif
-
 		}	
 
 		AssignColors();
@@ -204,6 +212,15 @@ void Build(AS_instrList il, struct Live_graph *live)
 		}
 		G_enter(moveList, temps->head, relatedMoves);
 	}
+
+#if _DEBUG_
+	file = fopen("__DEBUG_RA.md", "a");
+	fprintf(file, "## Build\n");
+	RA_MoveListDump(file, "### Work list moves", worklistMoves);
+	// dump_moveListTab(file, moveList);
+	fclose(file);
+#endif
+
 	// initialize degree table
 	for (G_nodeList l = G_nodes(live->graph); l; l = l->tail) {
 		int d = G_degree(l->head);
@@ -220,6 +237,14 @@ void Build(AS_instrList il, struct Live_graph *live)
 	for (G_nodeList l = G_nodes(live->graph); l; l = l->tail ){
 		G_enter(alias, l->head, l->head);
 	}
+#if _DEBUG_
+	file = fopen("__DEBUG_RA.md", "a");
+	fprintf(file, "### Alias table\n");
+	fprintf(file, "| Node | Alias |\n");
+	fprintf(file, "| :--: | :--: |\n");
+	TAB_dump(alias, (void (*)(void *, void *))alias_dump);
+	fclose(file);
+#endif
 }
 
 /*
@@ -229,15 +254,36 @@ void Build(AS_instrList il, struct Live_graph *live)
 void AddEdge(G_node u, G_node v)
 {
 	if (!G_inNodeList(u, G_adj(v)) && u != v) {
+#if _DEBUG_
+		file = fopen("__DEBUG_RA.md", "a");
+		fprintf(file, "#### Add edge between ");
+		printTemp(file, Live_gtemp(u));
+		fprintf(file, " and ");
+		printTemp(file, Live_gtemp(v));
+		fprintf(file, "\n");
+#endif
 		G_addEdge(u, v);
 		if (!isPrecolored(u)) {
 			int d = (int) G_look(degree, u);
 			G_enter(degree, u, (void *)(d + 1));
+#if _DEBUG_
+			fprintf(file, "* Node ");
+			printTemp(file, Live_gtemp(u));
+			fprintf(file, " degree : %d -> %d\n", d, d + 1);
+#endif
 		}
 		if (!isPrecolored(v)) {
 			int d = (int) G_look(degree, v);
 			G_enter(degree, v, (void *)(d + 1));
+#if _DEBUG_
+			fprintf(file, "* Node ");
+			printTemp(file, Live_gtemp(v));
+			fprintf(file, " degree : %d -> %d\n", d, d + 1);
+#endif
 		}
+#if _DEBUG_
+		fclose(file);
+#endif
 	}
 }
 
@@ -258,11 +304,23 @@ void MakeWorkList(G_graph live)
 		else
 			simplifyWorklist = N_aggregate(simplifyWorklist, G_NodeList(n->head, NULL));
 	}
+
+#if _DEBUG_
+	file = fopen("__DEBUG_RA.md", "a");
+	fprintf(file, "## Work list \n");
+	dumpNodeList(file, "* Simplify work list\n", simplifyWorklist);
+	dumpNodeList(file, "* Spill work list\n", spillWorklist);
+	dumpNodeList(file, "* Freeze work list\n", freezeWorklist);
+	fprintf(file, "-------------\n");
+	fclose(file);
+#endif
+
 }
 
 /* 
  * Function: Adjacent
  * Description: return adjacent nodes
+ * Warning: hard registers not filtered
  */
 G_nodeList Adjacent(G_node n){
 	return N_difference(G_adj(n),
@@ -285,7 +343,7 @@ Live_moveList NodeMoves(G_node n)
  */
 bool MoveRelated(G_node n)
 {
-	return NodeMoves(n) == NULL;
+	return NodeMoves(n) != NULL;
 }
 
 /*
@@ -296,13 +354,31 @@ void Simplify()
 {
 	assert(!isPrecolored(simplifyWorklist->head));
 	if (isPrecolored(simplifyWorklist->head)) goto done;
-	selectStack = G_NodeList(simplifyWorklist->head, selectStack);
+
+#if _DEBUG_
+	file = fopen("__DEBUG_RA.md", "a");
+	fprintf(file, "## Simplify\n");
+	showChange(file, "* [Select Stack 1]", selectStack, simplifyWorklist->head, ADD);
+	fclose(file);
+#endif
+
+	selectStack = N_aggregate(G_NodeList(simplifyWorklist->head, NULL), selectStack);
+	// selectStack = G_NodeList(simplifyWorklist->head, selectStack);
 	for (G_nodeList adj = Adjacent(simplifyWorklist->head); adj; adj = adj->tail)
 	{
+		if (isPrecolored(adj->head)) continue;
 		DecrementDegree(adj->head);
 	}
 	done:
-	simplifyWorklist = simplifyWorklist->tail;
+
+#if _DEBUG_
+		file = fopen("__DEBUG_RA.md", "a");
+		// fprintf(file, "### Simplify\n");
+		showChange(file, "* [Simplify work list 1]", simplifyWorklist, simplifyWorklist->head, REMOVE);
+		fclose(file);
+#endif
+
+		simplifyWorklist = simplifyWorklist->tail;
 }
 
 /* 
@@ -311,15 +387,41 @@ void Simplify()
  */
 void DecrementDegree(G_node m)
 {
+	if (isPrecolored(m)) return;
 	int d = (int) TAB_look(degree, m);
+
+#if _DEBUG_
+	file = fopen("__DEBUG_RA.md", "a");
+	fprintf(file, "- [Decrement degree] ");
+	fprintf(file, "Node ");
+	printTemp(file, G_nodeInfo(m));
+	fprintf(file, " degree %d -> _%d_\n", d, d - 1);
+	fclose(file);
+#endif
+
 	TAB_enter(degree, m, (void *)(d - 1));
 	if (d == K && !isPrecolored(m)) {
 		EnableMoves(N_aggregate(G_NodeList(m, NULL), Adjacent(m)));
+
+#if _DEBUG_
+		file = fopen("__DEBUG_RA.md", "a");
+		showChange(file, "* [Spill work list 2]", spillWorklist, m, REMOVE);
+		fclose(file);
+#endif
+
 		spillWorklist = N_remove(spillWorklist, m);
 		if (MoveRelated(m)) freezeWorklist = N_aggregate(freezeWorklist, G_NodeList(m, NULL));
 		else {
-			if (!isPrecolored(m))
+			if (!isPrecolored(m)) {
+
+#if _DEBUG_
+				file = fopen("__DEBUG_RA.md", "a");
+				showChange(file, "* [Simplify work list 2]", simplifyWorklist, m, ADD);
+				fclose(file);
+#endif
+
 				simplifyWorklist = N_aggregate(simplifyWorklist, G_NodeList(m, NULL));
+			}
 		}
 	}
 }
@@ -330,14 +432,30 @@ void DecrementDegree(G_node m)
  */
 void EnableMoves(G_nodeList nodes)
 {
+#if _DEBUG_
+	file = fopen("__DEBUG_RA.md", "a");
+	// fprintf(file, "## Enable Moves\n");
+	dumpNodeList(file, "#### Enable Moves", nodes);
+#endif
+
 	for (G_nodeList l = nodes; l; l = l->tail) {
 		for (Live_moveList m = NodeMoves(l->head); m; m = m->tail) {
 			if (inMoveList(activeMoves, m->src, m->dst)) {
+
+#if _DEBUG_
+				showChange2(file, "* [Active Moves 1 ]", activeMoves, m->src, m->dst, REMOVE);
+				showChange2(file, "* [Work list Moves 1 ]", worklistMoves, m->src, m->dst, ADD);
+#endif
+
 				activeMoves = L_remove(activeMoves, m->src, m->dst);
 				worklistMoves = L_aggregate(worklistMoves, Live_MoveList(m->src, m->dst, NULL));
 			}
 		}
 	}
+
+#if _DEBUG_
+	fclose(file);
+#endif
 }
 /* 
  * Function: Coalesce
@@ -358,17 +476,41 @@ void Coalesce()
 	else {
 		u = x; v = y;
 	}
+
+#if _DEBUG_
+	file = fopen("__DEBUG_RA.md", "a");
+	fprintf(file, "## Coalesce\n");
+	showChange2(file, "* [ Work list moves 2]", worklistMoves, m->src, m->dst, REMOVE);
+	fclose(file);
+#endif
+
 	worklistMoves = L_remove(worklistMoves, m->src, m->dst);
 	if (u == v) {
+
+#if _DEBUG_
+		file = fopen("__DEBUG_RA.md", "a");
+		showChange2(file, "* [ Coalesced moves 1]", coalescedMoves, m->src, m->dst, ADD);
+		fclose(file);
+#endif
+
 		coalescedMoves = L_aggregate(coalescedMoves, Live_MoveList(m->src, m->dst, NULL));
 		AddWorkList(u);
 	}
 	else if (isPrecolored(v) || G_inNodeList(u, G_adj(v))) {
+
+#if _DEBUG_
+		file = fopen("__DEBUG_RA.md", "a");
+		showChange2(file, "* [ Constrained moves 1]", constrainedMoves, m->src, m->dst, ADD);
+		fclose(file);
+#endif
+
 		constrainedMoves = L_aggregate(constrainedMoves, Live_MoveList(m->src, m->dst, NULL));
 		AddWorkList(u);
 		AddWorkList(v);
 	}
-	else if (isPrecolored(u)) {
+	else if ((isPrecolored(u) && OK(Adjacent(v), u)) || 
+	(!isPrecolored(u) && Conservative(N_aggregate(Adjacent(u), Adjacent(v))) )) {
+		/*
 		G_nodeList adjs = Adjacent(v);
 		bool flag = TRUE;
 		for (G_nodeList adjs = Adjacent(v); adjs; adjs = adjs->tail) {
@@ -376,14 +518,39 @@ void Coalesce()
 		}
 		if (flag || !isPrecolored(u) && 
 		Conservative(N_aggregate(Adjacent(u), Adjacent(v)))) {
-			coalescedMoves = L_aggregate(coalescedMoves, Live_MoveList(m->src, m->dst, NULL));
-			Combine(u, v);
-			AddWorkList(u);
+			*/
+
+#if _DEBUG_
+		file = fopen("__DEBUG_RA.md", "a");
+		showChange2(file, "* [ Coalesced moves 1 ]", coalescedMoves, m->src, m->dst, ADD);
+		fclose(file);
+#endif
+
+		coalescedMoves = L_aggregate(coalescedMoves, Live_MoveList(m->src, m->dst, NULL));
+		Combine(u, v);
+		AddWorkList(u);
+		/*
 		}
-		else
+		else {
+
+#if _DEBUG_
+			file = fopen("__DEBUG_RA.md", "a");
+			showChange2(file, "* [ Active moves 2 ]", activeMoves, m->src, m->dst, ADD);
+			fclose(file);
+#endif
+
 			activeMoves = L_aggregate(activeMoves, Live_MoveList(m->src, m->dst, NULL));
+		}
+		*/
 	}
 	else {
+
+#if _DEBUG_
+		file = fopen("__DEBUG_RA.md", "a");
+		showChange2(file, "* [ Active moves 2 ]", activeMoves, m->src, m->dst, ADD);
+		fclose(file);
+#endif
+
 		activeMoves = L_aggregate(activeMoves, Live_MoveList(m->src, m->dst, NULL));
 	}
 }
@@ -396,6 +563,14 @@ void AddWorkList(G_node u)
 {
 	int d = (int) TAB_look(degree, u);
 	if (!isPrecolored(u) && ! MoveRelated(u) && d < K) {
+
+#if _DEBUG_
+		file = fopen("__DEBUG_RA.md", "a");
+		showChange(file, "* [ Freeze Work list 1 ]", freezeWorklist, u, REMOVE);
+		showChange(file, "* [ Simplify Work list 3 ]", simplifyWorklist, u, ADD);
+		fclose(file);
+#endif
+
 		freezeWorklist = N_remove(freezeWorklist, u);
 		simplifyWorklist = N_aggregate(simplifyWorklist, G_NodeList(u, NULL));
 	}
@@ -403,16 +578,17 @@ void AddWorkList(G_node u)
 
 /*
  * Function: OK
- * Description: if node t is a low degree node, 
- * 							or node t is adjacent to node r
+ * Description: if each node of nodes is a low degree node, 
+ * 							or adjacent to node r
  */
-bool OK(G_node t, G_node r)
+bool OK(G_nodeList nodes, G_node r)
 {
-	int d = (int) G_look(degree, t);
-	bool ret = d < K;
-	ret = ret || isPrecolored(t);
-	ret = ret || G_inNodeList(r, G_adj(t));
-	return ret;
+	for (G_nodeList l = nodes; l; l = l->tail) {
+		int d = (int) G_look(degree, l->head);
+		bool ok = d < K || isPrecolored(l->head) || G_inNodeList(l->head, G_adj(r));
+		if (!ok) return FALSE;
+	}
+	return TRUE;
 }
 
 /*
@@ -423,6 +599,7 @@ bool Conservative(G_nodeList nodes)
 {
 	int k = 0;
 	for (G_nodeList l = nodes; l; l = l->tail) {
+		if (isPrecolored(l->head)) continue;
 		int d = (int) G_look(degree, l->head);
 		if (d >= K) k++;
 	}
@@ -449,23 +626,74 @@ G_node GetAlias(G_node n)
  */
 void Combine(G_node u, G_node v)
 {
+#if _DEBUG_
+	file = fopen("__DEBUG_RA.md", "a");
+	fprintf(file, "### Combine\n");
+	printTemp(file, Live_gtemp(u));
+	fprintf(file, " <--> ");
+	printTemp(file, Live_gtemp(v));
+	fprintf(file, "\n");
+	fclose(file);
+#endif
+
 	if (G_inNodeList(v, freezeWorklist)) {
+#if _DEBUG_
+		file = fopen("__DEBUG_RA.md", "a");
+		showChange(file, "* [ Freeze Work list 2 ]", freezeWorklist, v, REMOVE);
+		fclose(file);
+#endif
+
 		freezeWorklist = N_remove(freezeWorklist, v);
 	}
-	else spillWorklist = N_remove(spillWorklist, v);
+	else {
+#if _DEBUG_
+		file = fopen("__DEBUG_RA.md", "a");
+		showChange(file, "* [ Spill Work list 3 ]", spillWorklist, v, REMOVE);
+		fclose(file);
+#endif
+
+		spillWorklist = N_remove(spillWorklist, v);
+	}
+#if _DEBUG_
+		file = fopen("__DEBUG_RA.md", "a");
+		showChange(file, "* [ Coalesced Nodes 1 ]", coalescedNodes, v, ADD);
+		fclose(file);
+#endif
+
 	coalescedNodes = N_aggregate(coalescedNodes, G_NodeList(v, NULL));
+#if _DEBUG_
+	file = fopen("__DEBUG_RA.md", "a");
+	fprintf(file, "* [ Alias ] ");
+	printTemp(file, Live_gtemp(v));
+	fprintf(file, " ---> ");
+	printTemp(file, Live_gtemp(u));
+	fprintf(file, "\n\n");
+	fclose(file);
+#endif
 	G_enter(alias, v, u);
 	Live_moveList u_moves = G_look(moveList, u);
 	Live_moveList v_moves = G_look(moveList, v);
 	Live_moveList uv_moves = L_aggregate(u_moves, v_moves);
+#if _DEBUG_
+	file = fopen("__DEBUG_RA.md", "a");
+	fprintf(file, "| Temp | Related Moves |\n| :--: | :-- |\n");
+	printTempMoves(u, uv_moves);
+	fclose(file);
+#endif
 	G_enter(moveList, u, uv_moves);
 	EnableMoves(G_NodeList(v, NULL));
 	for (G_nodeList adjs = Adjacent(v); adjs; adjs = adjs->tail) {
 		AddEdge(adjs->head, u);
 		DecrementDegree(adjs->head);
 	}
-	int d = (int) TAB_look(degree, u);
+	int d = (int) G_look(degree, u);
 	if (d >= K && G_inNodeList(u, freezeWorklist)) {
+#if _DEBUG_
+		file = fopen("__DEBUG_RA.md", "a");
+		showChange(file, "* [ Freeze work list 3 ]", freezeWorklist, u, REMOVE);
+		showChange(file, "* [ Spill work list 4 ]", spillWorklist, u, ADD);
+		fclose(file);
+#endif
 		freezeWorklist = N_remove(freezeWorklist, u);
 		spillWorklist = N_aggregate(spillWorklist, G_NodeList(u, NULL));
 	}
@@ -480,6 +708,7 @@ void Freeze()
 	G_node u = NULL;
 	int deg = __INT_MAX__;
 	for (G_nodeList nl = freezeWorklist; nl; nl = nl->tail) {
+		assert(!isPrecolored(nl->head));
 		if (!MoveRelated(nl->head)) continue;
 		int dd = (int) TAB_look(degree, nl->head);
 		if (dd < deg) {
@@ -487,6 +716,12 @@ void Freeze()
 			deg = dd;
 		}
 	}
+#if _DEBUG_
+	file = fopen("__DEBUG_RA.md", "a");
+	showChange(file, "* [ Freeze work list 4 ]", freezeWorklist, u, REMOVE);
+	showChange(file, "* [ Simplify work list 4 ]", simplifyWorklist, u, ADD);
+	fclose(file);
+#endif
 	freezeWorklist = N_remove(freezeWorklist, u);
 	simplifyWorklist = N_aggregate(simplifyWorklist, G_NodeList(u, NULL));
 	FreezeMoves(u);
@@ -503,10 +738,22 @@ void FreezeMoves(G_node u)
 		G_node v = NULL;
 		if (GetAlias(y) == GetAlias(x)) v = GetAlias(x);
 		else v = GetAlias(y);
+#if _DEBUG_
+		file = fopen("__DEBUG_RA.md", "a");
+		showChange2(file, "* [ Active moves 3 ]", activeMoves, m->src, m->dst, REMOVE);
+		showChange2(file, "* [ Frozen moves 1 ]", frozenMoves, m->src, m->dst, ADD);
+		fclose(file);
+#endif
 		activeMoves = L_remove(activeMoves, m->src, m->dst);
 		frozenMoves = L_aggregate(frozenMoves, Live_MoveList(m->src, m->dst, NULL));
 		int d = (int) TAB_look(degree, v);
 		if (NodeMoves(v) == NULL && d < K && !isPrecolored(v)) {
+#if _DEBUG_
+			file = fopen("__DEBUG_RA.md", "a");
+			showChange(file, "* [ Freeze work list 5 ]", freezeWorklist, u, REMOVE);
+			showChange(file, "* [ Simplify work list 5 ]", simplifyWorklist, u, ADD);
+			fclose(file);
+#endif
 			freezeWorklist = N_remove(freezeWorklist, v);
 			simplifyWorklist = N_aggregate(simplifyWorklist, G_NodeList(v, NULL));
 		}
@@ -532,14 +779,14 @@ void SelectSpill()
 		for (G_nodeList l = spillWorklist; l; l = l->tail) {
 			assert(!isPrecolored(l->head));
 			if (G_inNodeList(l->head, newTemps)) {
-				int dd = (int) TAB_look(degree, l->head);
+				int dd = (int) G_look(degree, l->head);
 				if (dd > dtmp) {
 					dtmp = dd;
 					tmp = l->head;
 				}
 			}
 			else {
-				int dd = (int) TAB_look(degree, l->head);
+				int dd = (int) G_look(degree, l->head);
 				if (dd > d) {
 					d = dd;
 					m = l->head;
@@ -553,6 +800,14 @@ void SelectSpill()
 		else if (!m && tmp) m = tmp;
 	}
 	assert(m);
+#if _DEBUG_
+	file = fopen("__DEBUG_RA.md", "a");
+	fprintf(file, "## Select Spill\n");
+	dumpNodeList(file, "### Temps come from previous spill", newTemps);
+	showChange(file, "* [ Spill work list 5 ]", spillWorklist, m, REMOVE);
+	showChange(file, "* [ Simplify work list 6 ]", simplifyWorklist, m, ADD);
+	fclose(file);
+#endif
 	spillWorklist = N_remove(spillWorklist, m);
 	simplifyWorklist = N_aggregate(simplifyWorklist, G_NodeList(m, NULL));
 	FreezeMoves(m);
@@ -563,6 +818,11 @@ void SelectSpill()
  */
 void AssignColors()
 {
+#if _DEBUG_
+	file = fopen("__DEBUG_RA.md", "a");
+	fprintf(file, "## Assign Colors\n");
+	dumpNodeList(file, "* Select Stack", selectStack);
+#endif
 	// G_nodeList selectStack = selectStack;
 	bool okColors[K];
 	while (selectStack) {
@@ -579,15 +839,21 @@ void AssignColors()
 				okColors[color_idx - 1] = FALSE;
 			}
 		}
-		// TODO: find available color
-		int available = 0;
-		while (available < K && !okColors[available]) {
-			available++;
+		// TODO: find available color, from top down
+		int available = K - 1;
+		while (available >= 0 && !okColors[available]) {
+			available--;
 		}
-		if (available >= K) {
+		if (available < 0) {
+#if _DEBUG_
+			showChange(file, "* [ Spill work list 6 ]", spillWorklist, n, ADD);
+#endif
 			spilledNodes = N_aggregate(spilledNodes, G_NodeList(n, NULL));
 		}
 		else {
+#if _DEBUG_
+			showChange(file, "* [ Colored nodes ]", coloredNodes, n, ADD);
+#endif
 			coloredNodes = N_aggregate(coloredNodes, G_NodeList(n, NULL));
 			
 			G_enter(color, n, (void *)(available + 1));
@@ -599,6 +865,13 @@ void AssignColors()
 		int idx = (int) G_look(color, alias_node);
 		G_enter(color, n->head, (void *)idx);
 	}
+#if _DEBUG_
+	fprintf(file, "## Color Result\n");
+	fprintf(file, "| Node | Color | Successor |\n");
+	fprintf(file, "| :--: | :--: | :-- |\n");
+	TAB_dump(color, (void (*)(void *, void *))degree_print);
+	fclose(file);
+#endif
 }
 
 /*
@@ -610,6 +883,11 @@ void AssignColors()
 AS_instrList RewriteProgram(AS_instrList il_old, F_frame f, G_graph g_tmp)
 {
 	AS_instrList il_new = NULL;
+#if _DEBUG_
+	file = fopen("__DEBUG_RA.md", "a");
+	dumpNodeList(file, "* Spilled nodes", spilledNodes);
+	fclose(file);
+#endif
 	for (G_nodeList n = spilledNodes; n; n = n->tail) {
 		F_access acc = F_allocLocal(f, TRUE);
 		int offset = F_inFrameOffset(acc);
@@ -690,7 +968,9 @@ Temp_map AssignRegister(G_nodeList l)
 	ret = Temp_layerMap(ret, F_registerMap());
 	for (G_nodeList list = l; list; list = list->tail) {
 		int c = (int) G_look(color, list->head);
+		assert(c);
 		string sreg = F_literal(c);
+		assert(Live_gtemp(list->head));
 		Temp_enter(ret, Live_gtemp(list->head), sreg);
 	}
 	return ret;
@@ -723,6 +1003,12 @@ bool duplicate(Temp_tempList src, Temp_tempList dst, Temp_map colorMap)
 
 AS_instrList dummyMove(AS_instrList il_old, Temp_map colorMap)
 {
+#if _DEBUG_
+	static int cnt = 1;
+	file = fopen("__DEBUG_RA.md", "a");
+	fprintf(file, "## Dummy Move \n");
+	fprintf(file, "* Remove duplicate moves *\n");
+#endif
 	AS_instrList ret = NULL;
 	for (AS_instrList i = il_old; i; i = i->tail) {
 		if (i->head->kind == I_MOVE)
@@ -730,13 +1016,36 @@ AS_instrList dummyMove(AS_instrList il_old, Temp_map colorMap)
 			if (!duplicate(i->head->u.MOVE.src, i->head->u.MOVE.dst, colorMap))
 			{
 				ret = AS_splice(ret, AS_InstrList(i->head, NULL));
+#if _DEBUG_
+				fprintf(file, "%d. %s \t| dest : ", cnt++, i->head->u.MOVE.assem);
+				printTemp(file, i->head->u.MOVE.dst->head);
+				fprintf(file, " \t| src : ");
+				printTemp(file, i->head->u.MOVE.src->head);
+				fprintf(file, " \t|\n");
+#endif
 			}
 		}
 		else
 		{
 			ret = AS_splice(ret, AS_InstrList(i->head, NULL));
+// #if _DEBUG_
+// 			string assem = NULL;
+// 			switch (i->head->kind){
+// 			case I_OPER:
+// 				assem = i->head->u.OPER.assem;
+// 				break;
+// 			case I_LABEL:
+// 				assem = i->head->u.LABEL.assem;
+// 				break;
+// 			}
+// 			fprintf(file, "%d. %s\n", cnt++, assem);
+// #endif
 		}
 	}
+#if _DEBUG_
+	fprintf(file, "------------\n");
+	fclose(file);
+#endif
 	return ret;
 }
 
@@ -996,40 +1305,52 @@ int IndexTemp(Temp_temp t)
 }
 
 #if _DEBUG_
+void alias_dump(G_node n, G_node ali)
+{
+	fprintf(file, "| ");
+	printTemp(file, Live_gtemp(n));
+	fprintf(file, " | ");
+	printTemp(file, Live_gtemp(ali));
+	fprintf(file, " |\n");
+}
+
 void degree_print(G_node key, int value)
 {
 	Temp_temp t = G_nodeInfo(key);
-	int r = Temp_int(t);
 	if (isPrecolored(key)) {
 		string s = Temp_look(F_registerMap(), G_nodeInfo(key));
-		fprintf(file, "| %s | %d |\n", s, value);
+		fprintf(file, "| %s | %d | ", s, value);
 	}
 	else
-		fprintf(file, "| t<%d> | %d |\n", Temp_int(G_nodeInfo(key)), value);
-	(void *)r;
+		fprintf(file, "| t<%d> | %d | ", Temp_int(G_nodeInfo(key)), value);
+	for (G_nodeList l = G_succ(key); l; l = l->tail ) {
+		printTemp(file, Live_gtemp(l->head));
+		fprintf(file, ", ");
+	}
+	fprintf(file, " |\n");
 }
 
 void RA_degreeDump()
 {
 	file = fopen("__DEBUG_RA.md", "a");
 	fprintf(file, "## Degree table\n");
-	fprintf(file, "| Node(Temp) | Degree |\n");
-	fprintf(file, "| :--: | --: |\n");
+	fprintf(file, "| Node(Temp) | Degree | Adjacent |\n");
+	fprintf(file, "| :--: | :--: | :-- |\n");
 	TAB_dump(degree, (void (*)(void *, void *))degree_print);
 	fprintf(file, "--------------\n");
 	fclose(file);
 }
 
-void RA_worklistMovesDump()
+void RA_MoveListDump(FILE *file, string header, Live_moveList moves)
 {
-		file = fopen("__DEBUG_RA.md", "a");
-		fprintf(file, "# Register Allocation\n");
-		fprintf(file, "## work list moves\n");
+		// file = fopen("__DEBUG_RA.md", "a");
+		// fprintf(file, "# Register Allocation\n");
+		fprintf(file, "%s\n", header);
 		fprintf(file, "| From | To |\n");
 		fprintf(file, "| :--: | :--: |\n");
-		Live_mdump(file, worklistMoves);
+		Live_mdump(file, moves);
 		fprintf(file, "--------------------\n");
-		fclose(file);
+		// fclose(file);
 }
 
 void dumpTemp2Str(Temp_temp t, string s)
@@ -1041,5 +1362,166 @@ void dumpTemp2Str(Temp_temp t, string s)
 	else {
 		fprintf(file, "| t<%d> | %s |\n", Temp_int(t), s);
 	}
+}
+
+void dump_moveListTab(FILE *out, G_table tmp_mvs)
+{
+	fprintf(out, "* Temp - Move List Table\n\n");
+	fprintf(out, "| Temp | Related Moves |\n");
+	fprintf(out, "| :--: | :--- |\n");
+	TAB_dump(tmp_mvs, (void (*)(void *, void *))printTempMoves);
+	fprintf(out ,"----------------\n");
+}
+
+void printTemp(FILE * file, Temp_temp t)
+{
+	if (inTemplist(hardregisters(), t)) {
+		fprintf(file, "%s", Temp_look(F_registerMap(), t));
+	}
+	else {
+		fprintf(file, "t<%d>", Temp_int(t));
+	}
+}
+
+void printTempMoves(G_node n, Live_moveList moves)
+{
+	Temp_temp t = G_nodeInfo(n);
+	fprintf(file, "| ");
+	printTemp( file, t );
+	fprintf(file, " | ");
+	for (Live_moveList mvs = moves; mvs; mvs = mvs->tail) {
+		fprintf(file, "( ");
+		printTemp(file, Live_gtemp(mvs->src));
+		fprintf(file, " -> ");
+		printTemp(file, Live_gtemp(mvs->dst));
+		fprintf(file, " ), ");
+	}
+	fprintf(file, " |\n");
+}
+
+void dumpNodeList(FILE *out, string header, G_nodeList nodes)
+{
+	fprintf(out, "%s : ", header);
+	for (G_nodeList l = nodes; l; l = l->tail) {
+		printTemp(out, G_nodeInfo(l->head));
+		fprintf(out, ", ");
+	}
+	fprintf(out, "\n");
+}
+
+/*
+ * @nodes : original node list
+ * @n : node to be deleted or added to the list
+ * @add : 1 for add, 0 for delete
+ */
+void showChange(FILE *out, string header, G_nodeList nodes, G_node n, int add)
+{
+	fprintf(out, "%s ", header);
+	if (add) {
+		fprintf(out, " add node : ");
+		bool exists = FALSE;
+		for (G_nodeList l = nodes; l; l = l->tail) {
+			if (l->head == n) {
+				fprintf(out, "__");
+				printTemp(out, G_nodeInfo(n));
+				fprintf(out, "__, ");
+				exists = TRUE;
+			}
+			else {
+				printTemp(out, G_nodeInfo(l->head));
+				fprintf(out, ", ");
+			}
+		}
+		if (!exists) {
+			fprintf(out, "__");
+			printTemp(out, G_nodeInfo(n));
+			fprintf(out, "__, ");
+		}
+	}
+	else {
+		fprintf(out, " delete node : ");
+		bool exists = FALSE;
+		for (G_nodeList l = nodes; l; l = l->tail) {
+			if (l->head == n) {
+				fprintf(out, "~~");
+				printTemp(out, G_nodeInfo(n));
+				fprintf(out, "~~, ");
+				exists = TRUE;
+			}
+			else {
+				printTemp(out, G_nodeInfo(l->head));
+				fprintf(out, ", ");
+			}
+		}
+		if (!exists) {
+			fprintf(out, "\n> [Warning] !! ");
+			printTemp(out, G_nodeInfo(n));
+			fprintf(out, " not exists !!\n");
+		}
+	}
+	fprintf(out, "\n");
+}
+
+void printMove(FILE *out, Live_moveList moves)
+{
+	fprintf(out, "( ");
+	printTemp(out, Live_gtemp(moves->src));
+	fprintf(out, " -> ");
+	printTemp(out, Live_gtemp(moves->dst));
+	fprintf(out, " )");
+}
+
+void showChange2(FILE *out, string header, Live_moveList moves, G_node src, G_node dst, int add)
+{
+	fprintf(out, "%s", header);
+	if (add) {
+		fprintf(out, " add move : ");
+		bool exists = FALSE;
+		for (Live_moveList mvs = moves; mvs; mvs = mvs->tail ) {
+			if (src == mvs->src && dst == mvs->dst) {
+				fprintf(out, "__");
+				printMove(out, mvs);
+				fprintf(out, "__, ");
+				exists = TRUE;
+			}
+			else {
+				printMove(out, mvs);
+				fprintf(out, ", ");
+			}
+		}
+		if (!exists) {
+			fprintf(out, "__( ");
+			printTemp(out, Live_gtemp(src));
+			fprintf(out, " -> ");
+			printTemp(out, Live_gtemp(dst));
+			fprintf(out, " )__, ");
+		}
+	}
+	else {
+		fprintf(out, " remove move : ");
+		bool exists = FALSE;
+		for (Live_moveList mvs = moves; mvs; mvs = mvs->tail ) {
+			if (src == mvs->src && dst == mvs->dst) {
+				fprintf(out, "~~");
+				printMove(out, mvs);
+				fprintf(out, "~~, ");
+				exists = TRUE;
+			}
+			else {
+				printMove(out, mvs);
+				fprintf(out, ", ");
+			}
+		}
+		if (!exists) {
+			fprintf(out, "\n> [Warning] !! ");
+			fprintf(out, "( ");
+			printTemp(out, Live_gtemp(src));
+			fprintf(out, " -> ");
+			printTemp(out, Live_gtemp(dst));
+			fprintf(out, " ) ");
+			fprintf(out, " not exists !!\n");
+		}
+	}
+	fprintf(out, "\n");
 }
 #endif

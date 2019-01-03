@@ -67,3 +67,7 @@ void G_enter(G_table t, G_node node, void *value);
 void *G_look(G_table t, G_node node);
 
 #endif
+
+#if _DEBUG_
+int G_Key(G_node n);
+#endif
